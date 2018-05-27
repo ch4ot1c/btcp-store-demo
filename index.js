@@ -87,13 +87,9 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
 
   app.use(bodyParser.urlencoded({extended: true}));
 
-  // Serve 'static' dir at localhost:8001
-  app.use('/', express.static(__dirname + '/static'));
-
-  // *** Invoice Server model ***
+  // *** Invoice server model ***
   // To generate an invoice,
   // POST localhost:8001/invoice {productID: String}
-  // (DB starts at addressIndex `1`)
   // TODO Rate limit per ip
   // TODO deliveryEmail (optional)
 
@@ -104,8 +100,9 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
     let productID = req.body._id || req.body.productID;
     var addressIndex;
 
-    // Generate (next) fresh address & present invoice
-    Merchant.findOneAndUpdate({}, {$inc: {address_index: 1}})
+    // Generate fresh address & present invoice
+    // (DB starts at addressIndex `0`, and post-increments)
+    Merchant.findOneAndUpdate({}, {$inc: {address_index: 1}}, {returnNewDocument: false})
     .exec()
     .then(m => {
       addressIndex = m.address_index;
@@ -126,6 +123,9 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
       return res.status(500).send({error: 'Failed to find Merchant/create Invoice in Mongo'});
     });
   });
+
+  // Serve 'static' dir at localhost:8001
+  //app.use('/', express.static(__dirname + '/static'));
 
 };
 
