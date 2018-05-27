@@ -15,7 +15,7 @@ const Product = require('./models').Product;
 const DUMMY_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 
 // This module will be installed as a service of Bitcore, which will be running on localhost:8001.
-// TEST - `localhost:8001/store-demo/index.html`
+// EXAMPLE - `localhost:8001/store-demo/index.html`
 
 function PizzaShop(options) {
   EventEmitter.call(this);
@@ -28,15 +28,14 @@ function PizzaShop(options) {
   // Connect to MongoDB
   mongoose.connect(options.mongoURL || DUMMY_MONGO_URL, null)
   .then(() => {
-
     Merchant.findOne({})
     .select('xpub')
     .exec()
     .then(m => {
       if (!m || m.xpub == null) {
-	return mongoose.Promise.reject("xpub hasn't been set!!! Run `node generate_hd_wallets` offline.");
+        return mongoose.Promise.reject("xpub hasn't been set!!! Run `node generate_hd_wallets` offline.");
       } else {
-	this.xpub = m.xpub;
+        this.xpub = m.xpub;
       }
     })
     .catch(e => {
@@ -87,13 +86,9 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
 
   app.use(bodyParser.urlencoded({extended: true}));
 
-  // Serve 'static' dir at localhost:8001
-  app.use('/', express.static(__dirname + '/static'));
-
-  // *** Invoice Server model ***
+  // *** Invoice server model ***
   // To generate an invoice,
   // POST localhost:8001/invoice {productID: String}
-  // (DB starts at addressIndex `1`)
   // TODO Rate limit per ip
   // TODO deliveryEmail (optional)
 
@@ -104,8 +99,9 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
     let productID = req.body._id || req.body.productID;
     var addressIndex;
 
-    // Generate (next) fresh address & present invoice
-    Merchant.findOneAndUpdate({}, {$inc: {address_index: 1}})
+    // Generate fresh address & present invoice
+    // (DB starts at addressIndex `0`, and post-increments)
+    Merchant.findOneAndUpdate({}, {$inc: {address_index: 1}}, {returnNewDocument: false})
     .exec()
     .then(m => {
       addressIndex = m.address_index;
@@ -126,6 +122,9 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
       return res.status(500).send({error: 'Failed to find Merchant/create Invoice in Mongo'});
     });
   });
+
+  // Serve 'static' dir at localhost:8001
+  //app.use('/', express.static(__dirname + '/static'));
 
 };
 
