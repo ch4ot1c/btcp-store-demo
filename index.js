@@ -102,6 +102,7 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
   app.post('/invoice', function(req, res, next) {
     self.log.info('POST /invoice: ', req.body);
     let productID = req.body._id || req.body.productID;
+    var xpub;
     var addressIndex;
 
     // Generate next/fresh address & present invoice
@@ -110,6 +111,7 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
     .exec()
     .then(m => {
       addressIndex = m.address_index;
+      xpub = m.xpub;
       return Product.findById(productID).exec();
     })
     .then(p => {
@@ -121,14 +123,17 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
     .then(i => {
       // Derive address, and append to response
       // Here, "/0/" == External addrs, "/1/" == Internal (change) addrs
-      i.address = bitcore.HDPublicKey(this.xpub).deriveChild("m/0/" + addressIndex).publicKey.toAddress();
+      var address = bitcore.HDPublicKey(xpub).deriveChild("m/0/" + addressIndex).publicKey.toAddress();
 
       // Hash, aka the H of P2PKH or P2SH
       //i.hash = i.address.hashBuffer.toString('hex');
 
-      this.log.info('New invoice; generated address:', i.address);
+      self.log.info('New invoice; generated address:', address);
 
-      return res.status(200).send(i);
+      let json = i.toObject();
+      json.address = address.toString();
+
+      return res.status(200).send(json);
     })
     .catch(e => {
       self.log.error(e);
