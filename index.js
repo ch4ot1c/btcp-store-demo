@@ -99,9 +99,24 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
 
   // TODO represent as state machine on both client and srv - AWAITING_PAYMENT -> FULL_AMOUNT_RECEIVED / TIMED_OUT / PARTIAL_AMOUNT_RECEIVED
 
+  app.get('/products', function(req, res, next) {
+    self.log.info('GET /products: ', req.body);
+
+    Product.find({})
+    .exec()
+    .then(ps => {
+      return res.status(200).send(ps);
+    })
+    .catch(e => {
+      self.log.error(e);
+      return res.status(500).send({error: 'Failed to find Products in Mongo'});
+    });
+
+  });
+
   app.post('/invoice', function(req, res, next) {
     self.log.info('POST /invoice: ', req.body);
-    let productID = req.body._id || req.body.productID;
+    var productID = req.body._id || req.body.productID;
     var xpub;
     var addressIndex;
 
