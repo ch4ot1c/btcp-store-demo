@@ -23,7 +23,7 @@ var xpub = xprv.hdPublicKey;
 var derivedHDPublicKey = xprv.deriveChild(externalAddrPath).hdPublicKey;
 var derivedXpubkey = derivedHDPublicKey.xpubkey.toString();
 
-// Connect to mongoose
+// Connect to MongoDB
 mongoose.connect(DUMMY_MONGO_URL);
 
 // Store derived xpub (for address generation) in only one mongodb Merchant
