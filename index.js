@@ -25,15 +25,16 @@ function PizzaShop(options) {
 
   this.invoiceHtml = fs.readFileSync(__dirname + '/invoice.html', 'utf8');
 
-  // Connect to MongoDB
-  mongoose.connect(options.mongoURL || DUMMY_MONGO_URL, null)
+  // Connect to MongoDB (Warning - connect() is Not a real Promise)
+  //TODO createConnection, global obj
+  mongoose.connect(options.mongoURL || DUMMY_MONGO_URL)
   .then(() => {
     Merchant.findOne({})
     .select('xpub')
     .exec()
     .then(m => {
       if (!m || m.xpub == null) {
-        return mongoose.Promise.reject("xpub hasn't been set!!! Run `node generate_hd_wallets` offline.");
+        return mongoose.Promise.reject("xpub hasn't been set!!! Run `node generate_hd_wallet` offline.");
       } else {
         this.xpub = m.xpub;
       }
@@ -86,6 +87,10 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
 
   app.use(bodyParser.urlencoded({extended: true}));
 
+  // Serve 'static' dir at localhost:8001
+  app.use('/', express.static(__dirname + '/static'));
+
+
   // *** Invoice server model ***
   // To generate an invoice,
   // POST localhost:8001/invoice {productID: String}
@@ -99,7 +104,7 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
     let productID = req.body._id || req.body.productID;
     var addressIndex;
 
-    // Generate fresh address & present invoice
+    // Generate next/fresh address & present invoice
     // (DB starts at addressIndex `0`, and post-increments)
     Merchant.findOneAndUpdate({}, {$inc: {address_index: 1}}, {returnNewDocument: false})
     .exec()
@@ -109,50 +114,39 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
     })
     .then(p => {
       if (!p) {
-        return mongoose.Promise.reject('No products in DB!');
+        return mongoose.Promise.reject('Product not found in DB!');
       }
       return Invoice.create({address_index: addressIndex, product_id: p._id, total_satoshis: p.price_satoshis});
     })
     .then(i => {
-      // Content-Type: text/html
-      return res.status(200).send(self.buildInvoiceHTML(i.address_index, i.total_satoshis));
+      // Derive address, and append to response
+      // Here, "/0/" == External addrs, "/1/" == Internal (change) addrs
+      i.address = bitcore.HDPublicKey(this.xpub).deriveChild("m/0/" + addressIndex).publicKey.toAddress();
+
+      // Hash, aka the H of P2PKH or P2SH
+      //i.hash = i.address.hashBuffer.toString('hex');
+
+      this.log.info('New invoice; generated address:', i.address);
+
+      return res.status(200).send(i);
     })
     .catch(e => {
       self.log.error(e);
       return res.status(500).send({error: 'Failed to find Merchant/create Invoice in Mongo'});
     });
   });
-
-  // Serve 'static' dir at localhost:8001
-  //app.use('/', express.static(__dirname + '/static'));
-
 };
 
 PizzaShop.prototype.getRoutePrefix = function() {
   return 'store-demo';
 };
 
-PizzaShop.prototype.buildInvoiceHTML = function(addressIndex, totalSatoshis) {
-  let price = totalSatoshis / 1e8; // (100,000,000 sats == 1 BTCP)
-
-  // Address for this invoice
-  // Here, "/0/" == External addrs, "/1/" == Internal (change) addrs
-  //TODO - use correct lib+method - bitcore-lib and deriveChild
-  //let b_new = require('bitcore-lib');  
-  //let k = b_new.HDPublicKey(this.xpub);
-  //let address = k.deriveChild("/0/" + addressIndex).publicKey.toAddress();
-  let k = bitcore.HDPublicKey(this.xpub);
-  let address = k.derive("m/0/" + addressIndex).publicKey.toAddress();
-
-  // Hash, aka the H of P2PKH or P2SH
-  let hash = address.hashBuffer.toString('hex');
-
-  this.log.info('New invoice, with generated address:', address);
-
+// Not in use - Content-Type: text/html
+PizzaShop.prototype.buildInvoiceHTML = function(invoice) {
   var transformed = this.invoiceHtml
-    .replace(/{{price}}/g, price)
-    .replace(/{{address}}/g, address)
-    .replace(/{{hash}}/g, hash)
+    .replace(/{{price}}/g, invoice.price_satoshis / 1e8)
+    .replace(/{{address}}/g, invoice.address)
+    .replace(/{{hash}}/g, invoice.hash)
     .replace(/{{baseUrl}}/g, '/' + this.getRoutePrefix() + '/');
   return transformed;
 };
