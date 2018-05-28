@@ -15,7 +15,7 @@ const Product = require('./models').Product;
 const DUMMY_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 
 // This module will be installed as a service of Bitcore, which will be running on localhost:8001.
-// TEST - `localhost:8001/store-demo/index.html`
+// EXAMPLE - `localhost:8001/store-demo/index.html`
 
 function PizzaShop(options) {
   EventEmitter.call(this);
@@ -28,15 +28,14 @@ function PizzaShop(options) {
   // Connect to MongoDB
   mongoose.connect(options.mongoURL || DUMMY_MONGO_URL, null)
   .then(() => {
-
     Merchant.findOne({})
     .select('xpub')
     .exec()
     .then(m => {
       if (!m || m.xpub == null) {
-	return mongoose.Promise.reject("xpub hasn't been set!!! Run `node generate_hd_wallets` offline.");
+        return mongoose.Promise.reject("xpub hasn't been set!!! Run `node generate_hd_wallets` offline.");
       } else {
-	this.xpub = m.xpub;
+        this.xpub = m.xpub;
       }
     })
     .catch(e => {

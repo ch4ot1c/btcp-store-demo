@@ -54,9 +54,12 @@ Merchant.findOne({})
   return createDummyProducts();
 })
 .then(ps => {
+  console.log(`\nDummy products created in MongoDB! - `);
+  console.log(`\n${ps}`);
+
   // EXAMPLE - derive address by index - this normally occurs at API endpoint `/next_address`
   let index = 0;
-  let address = baseHDPublicKey.deriveChild("m/0/" + index).publicKey.toAddress();
+  let address = derivedHDPublicKey.deriveChild("m/0/" + index).publicKey.toAddress();
   console.log(`\nAddress at index ${index}: ${address}`);
 
   reportComplete();
@@ -74,10 +77,7 @@ function createDummyProducts() {
     Product.create({name: 'pizza_whole', price_satoshis: '800'}),
     Product.create({name: 'pizza_half', price_satoshis: '400'}),
     Product.create({name: 'pizza_oneslice', price_satoshis: '100'})
-  ]).then(ps => {
-    console.log(`\nDummy products created in MongoDB! - `);
-    console.log(`\n${ps}`);
-  })
+  ])
 }
 
 function reportWalletInfo() {
@@ -110,7 +110,7 @@ function reportWalletInfo() {
 }
 
 function reportXpubSaved() {
-  console.log('The **Derived HD Public Key** is now stored on your server, in MongoDB, for address generation.');
+  console.log('\nThe **Derived HD Public Key** is now stored on your server, in MongoDB, for address generation.');
 }
 
 function reportComplete() {
