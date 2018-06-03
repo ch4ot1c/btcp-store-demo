@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pizza Shop</title>
+  <base href="{{baseUrl}}" />
+  <script src="js/socket.io-client/socket.io.js"></script>
+  <script src="js/bitcore-lib/bitcore-lib.js"></script>
+</head>
+
+<body>
+  <h1>Pizza Shop</h1>
+  <h2>To shop, please enter your email (so we can deliver your receipt / digital goods)
+  <input type="email" name="email_address"/>
+
+  <!-- New set of addrs every time, mandatory, even if same email as an unfinished -->
+
+  <!-- or - partial deanon - email DOES show db history for that email, and allows u to 'complete' any unfinished txs (re-use / re-show those addrs) -->
+
+ 
+  <!-- Then, generate these, saving each address_index/address-to-watch for each un-complete invoice for this email address, and add these to srv watch, and watch + display these on this client -->
+  <h2>{{invoice.product.name}}</h2>
+  <p>To Buy - Pay <b>{{invoice.total_satoshis}} BTCP</b> to <b>{{invoice.address}}</b>.</p>
+  <!-- TODO UI for a outer glow -->
+</body>
+
+</html>
+

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pizza Shop</title>
+  <base href="{{baseUrl}}" />
+  <script src="js/socket.io-client/socket.io.js"></script>
+  <script src="js/bitcore-lib/bitcore-lib.js"></script>
+</head>
+
+<body>
+  <!-- TODO topbar red - Don't forget your email address in the memo! Otherwise your item may not be deliverable! -->
+  <h1>Pizza Shop</h1>
+  <h2>To shop here, you will need to send a special type of transaction.</h2>
+  <p>Use the <a>BTCP Full Node Desktop Wallet</a> to send a shielded memo containing **your email address**. This will be used to deliver your receipt receipt / digital goods.</p>
+  <button onclick="document.getElementById('reveal').style.display = 'block';">OK</button>
+
+  <!-- CAN ALL BE DONE WATCHING 1 Z ADDR PER PRODUCT - index by 'memo' email -->
+  <!-- (Offload accounting to MongoDB) -->
+
+  <div id="reveal" style="display:none;">
+    <h2>{{product.name}}</h2>
+    <p>To Buy - Pay <b>{{product.price_satoshis}} BTCP</b> to <b>{{product.address}}</b>.</p>
+    <b>Don't forget to put your EMAIL in the memo field of your shielded transaction - otherwise you cannot get a receipt / download link!!!</b> 
+    <!-- TODO UI for a outer glow (on socket events)-->
+    <!-- TODO Display Multiple Products --> 
+  </div>
+
+
+<script>
+/* Handle client-side events, as provided by a trusted daemon + bitcore node over socket.io */
+/* WARNING: If the daemon and/or the bitcoin node are down, payments will not process!!! */
+
+var bitcore = require('bitcore-lib');
+
+let socketURL = 'ec2-54-245-190-72.us-west-2.compute.amazonaws.com:8001';
+
+
+// TODO watching z addrs - use viewing key - 'zkY4fCSnTUC7fWiPSduJC2kXGMMcRgDsiAv8C7mdWYnLUxRWVh1ocq4XuGzZSDQAu7mqzJGbFPcEeupnWUL2NUv615J38om'
+// Products, from DB (mocked)
+// TODO fetch - GET /products
+let products = [{_id: 'pid1', address: 'b1HGkrggGcajysjervsPqQVAB53tgAFGwKW', price_satoshis: 100}, {_id: 'pid2', address: 'b1xy', price_satoshis: 200}];
+
+// Payments & Confirmations Log
+// productAddress - userAddress mapping
+// TODO Should match DB, so if server goes down, pending address continues to be watched for nth confirm upon reconnect.
+let confirms = {};
+for (let o in products) {
+  confirms[o.address] = {addr: null, txID: null, num: 0, confirmedSatoshis: 0, unconfirmedSatoshis: 0};
+} 
+// EXAMPLE - let confirms = [{b1aa: {num: 0, confirmedSatoshis: 0, unconfirmedSatoshis: 0}}]
+
+
+startSocket(socketURL);
+
+function updateSocketSubscriptions(addresses) {
+    //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid', addresses);
+    socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
+}
+
+function unsubscribeToAll() {
+    // Subscribe to hashblock, rawtransaction, and addresstxid channels
+    socket.emit('unsubscribe', 'bitcoind/hashblock');
+    socket.emit('unsubscribe', 'bitcoind/rawtransaction');
+    //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid');
+}
+
+function startSocket(url) {
+    // Connect to socket.io, which Bitcore forwards from the indexing daemon's ZMQ
+    socket = io('//' + socketURL);
+
+    // Subscribe to hashblock, rawtransaction, and addresstxid channels
+    socket.emit('subscribe', 'bitcoind/hashblock');
+    socket.emit('subscribe', 'bitcoind/rawtransaction');
+
+    let addresses = products.map(p => { return p.address; }); 
+    socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
+
+    // Handle -
+
+    socket.on('bitcoind/hashblock', function(blockHashHex) {
+      console.info('bitcoind/hashblock');
+      console.log(blockHashHex);
+
+      // Increase number of confirms
+      //let pending = confirms.filter(x => { return addresses.includes(x.address) && confirms.buyerAddresses[x.address] < 6; }));
+      confirms.forEach((c, i) => {
+	c.num++;
+	if (c.num < 6) {
+	  console.log(c);
+	  if (c.num === 0) {
+	    console.log('Received initial block for ' + JSON.stringify(c));
+	  }
+	} else {
+	  onPaymentConfirmed(c);
+	  //TODO prune completed items
+	}
+      });
+    });
+
+    socket.on('bitcoind/addresstxid', function(data) {
+      console.info('bitcoind/addresstxid');
+      // Get and confirm address
+      let bitcoreAddress = bitcore.Address(data.address); //TODO z addrs
+      let a = bitcoreAddress.toString();
+      if (addresses.includes(a)) { // redundant?
+          console.log(a);
+          console.log(data.txid);
+          confirms[a].txID = data.txid; //TODO ignore double payment?
+
+          displayProcessingMessage();
+       }
+    });
+
+    socket.on('bitcoind/rawtransaction', function(transactionHex) {
+        console.info('bitcoind/rawtransaction');
+        // Get outputs
+        var o = bitcore.Transaction(transactionHex).outputs;
+        // Find our address in that tx block
+        for (var i = 0; i < o.length; i++) {
+            let a = bitcore.Address.fromScript(bitcore.Script.fromBuffer(o[i]._scriptBuffer)).toString(); 
+            // Handle only txs corresponding to some product's address
+            if (addresses.includes(a)) { // redundant?
+              let p = products.filter(x => { return x.address === a; })[0];
+
+              // Check user has paid correct amount -
+              // Three Cases - too little, too much, exact amount
+              // Default Forgiveness Threshold = 5000 sats
+              const FORGIVENESS_SATOSHIS = 5000;
+
+              // Paid too little (5000 sats or less under required amount)
+              if (o[i].satoshis < p.price_satoshis - FORGIVENESS_SATOSHIS) {
+                // Set amount to pay and alert user
+                let difference = p.price_satoshis - o[i].satoshis;
+                alert('You have paid '+(difference/100000000).toFixed(8)+' BTCP too little.\n\nYour transaction will not be processed, but should be saved in the merchant\'s database.');
+                console.error('PAYMENT ISSUE - TODO ELEGANT HANDLING');
+                //TODO elegant handling
+              // Paid too much
+              } else if (o[i].satoshis > p.price_satoshis) {
+                // Set amount overpaid and alert user
+                let difference = o[i].satoshis - p.price_satoshis;   
+                alert('You have paid '+(difference/100000000).toFixed(8)+' BTCP too much.\n\nPlease contact merchant to discuss any partial refund.');
+                console.warn('PAYMENT ISSUE - TODO ELEGANT HANDLING');
+                //TODO elegant handling
+                //TODO for now, their overpayment is accepted as a donation
+
+                // Permit order to proceed
+                displayProcessingMessage();
+              // Paid correct amount
+              } else {
+                displayProcessingMessage();
+              }
+              break;
+           }
+        }
+    });
+}
+
+function displayProcessingMessage() {
+  console.log('Processing Payment from ' + a);
+  //TODO
+};
+
+// If srv, deliver and mark 'delivered' in DB, for this user
+// If client, show visual 
+function onPaymentConfirmed(c) {
+  console.log(c.addr);
+  //TODO console.log(txid);
+  //TODO
+};
+
+</script>
+
+</body>
+
+</html>
+
+
