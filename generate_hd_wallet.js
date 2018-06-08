@@ -1,12 +1,5 @@
 'use strict';
 
-// BTCP - BIP44 + BIP39 / HD wallet setup
-
-const Mnemonic = require('bitcore-mnemonic');
-
-const hdAccount = 0;
-const externalAddrPath = "m/44'/183'/" + hdAccount + "'"; // BIP-0044 + SLIP-0044
-const seed = new Mnemonic(Mnemonic.Words.ENGLISH); // Generate
 
 // Mongoose
 const mongoose = require('mongoose');
@@ -16,6 +9,20 @@ mongoose.Promise = require('bluebird'); //finally()
 const Merchant = require('./models.js').Merchant;
 const Product = require('./models.js').Product;
 
+// BTCP - BIP44 + BIP39 / HD wallet setup
+
+const Mnemonic = require('bitcore-mnemonic');
+
+const hdAccount = 0;
+const externalAddrPath = "m/44'/183'/" + hdAccount + "'"; // BIP-0044 + SLIP-0044
+
+
+// WARNING: Private keys should always be generated OFFLINE. Running this script on a remote server is not recommended! You can stay safe by only inputting the 'xpub', for address generation.
+
+// Visit https://wallet.btcprivate.org for an offline option.
+
+// Generate BIP39 mnemonic seed
+const seed = new Mnemonic(Mnemonic.Words.ENGLISH);
 // Generate everything
 var xprv = seed.toHDPrivateKey();
 var xpub = xprv.hdPublicKey;
@@ -57,11 +64,6 @@ Merchant.findOne({})
   console.log(`\nDummy products created in MongoDB! - `);
   console.log(`\n${ps}`);
 
-  // EXAMPLE - derive address by index - this normally occurs at API endpoint `/next_address`
-  let index = 0;
-  let address = derivedHDPublicKey.deriveChild("m/0/" + index).publicKey.toAddress();
-  console.log(`\nAddress at index ${index}: ${address}`);
-
   reportComplete();
 })
 .catch(e => {
@@ -71,12 +73,23 @@ Merchant.findOne({})
   mongoose.disconnect();
 });
 
+// To create the dummy mongodb/mongoose Products only:
+/*
+createDummyProducts()
+.then(ps => { console.log(ps); mongoose.disconnect(); })
+.catch(e => { console.error(e); });
+*/
+
+
+function addressAtIndex(index) {
+  return derivedHDPublicKey.deriveChild("m/0/" + index).publicKey.toAddress();
+}
 
 function createDummyProducts() {
   return Promise.all([
-    Product.create({name: 'pizza_whole', price_satoshis: '800'}),
-    Product.create({name: 'pizza_half', price_satoshis: '400'}),
-    Product.create({name: 'pizza_oneslice', price_satoshis: '100'})
+    Product.create({name: 'pizza_whole', price_satoshis: '800', address_btcp: addressAtIndex(0)}),
+    Product.create({name: 'pizza_half', price_satoshis: '400', address_btcp: addressAtIndex(1)}),
+    Product.create({name: 'pizza_oneslice', price_satoshis: '100', address_btcp: addressAtIndex(2)})
   ])
 }
 
