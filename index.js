@@ -4,7 +4,10 @@ var EventEmitter = require('events').EventEmitter;
 const fs = require('fs');
 const bitcore = require('bitcore-lib');
 const bodyParser = require('body-parser');
+
 const mongoose = require('mongoose');
+mongoose.Promise = require('bluebird');
+global.Promise = mongoose.Promise;
 
 const io = require('socket.io-client');
 
@@ -27,6 +30,14 @@ function PizzaShop(options) {
   this.node = options.node;
   this.log = this.node.log;
 
+  var self = this;
+  //this.log.info(require('util').inspect(self.node));
+  //this.log.info(this.node.services.bitcoind.height);
+  this.node.services.bitcoind.on('tip', function(x) {
+    self.log.info('tip');
+    self.log.info(x);
+  });
+
   // Connect to MongoDB (Warning - connect() is Not a real Promise)
   //TODO createConnection, global obj
   mongoose.connect(options.mongoURL || DEFAULT_MONGO_URL)
@@ -36,23 +47,26 @@ function PizzaShop(options) {
     .exec()
     .then(m => {
       if (!m || m.xpub == null) {
-        return mongoose.Promise.reject('Merchant doesn\'t exist (and/or no xpub has been set)!!! Run `node generate_hd_wallet` offline.');
+        return Promise.reject('Merchant doesn\'t exist (and/or no xpub has been set)!!! Run `node generate_hd_wallet` offline.');
       } else {
         this.xpub = m.xpub;
+        return Promise.resolve();
       }
     })
+    .then(() => {
+      return getAllProducts().then(ps => { startSocket(hostURL, ps.map(p => p.btcp_address)) }).catch(e => { self.log.error(e) })
+    })
     .catch(e => {
-      this.log.error(e);
+      self.log.error(e);
     });
-  }, e => { this.log.error(e.message); });
+  }, e => { self.log.error(e.message); });
 
-  startSocket(hostURL);
 
 
 // TODO Socket.io - serverside watching + db updates
-// TODO reuse code from client
+// TODO verification as accounting for batches of Transactions on tip updates
 
-//TODO elegantly disconnect mongoose, socket.io
+// TODO elegantly disconnect mongoose, socket.io
 
 }
 
@@ -74,6 +88,18 @@ PizzaShop.prototype.getPublishEvents = function() {
   return [];
 };
 
+// 1 address per product.
+function getAllProducts() {
+  return Product.find()
+  .exec()
+  .then(ps => {
+    return Promise.resolve(ps.map(p => p.toObject()))
+  })
+  .catch(e => {
+    return Promise.reject(e)
+  })
+}
+// TODO pagination options
 
 PizzaShop.prototype.setupRoutes = function(app, express) {
   var self = this;
@@ -92,26 +118,25 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
   // *** 'Moneyholes' model ***
   // All Product data -
   // GET localhost:8001/products
-  // 1 address per product.
 
   // TODO Rate limit per ip
-  // TODO pagination options
   app.get('/products', function(req, res, next) {
     self.log.info('GET /products: ', req.body);
 
-    Product.find({})
-    .exec()
+    getAllProducts()
     .then(ps => {
-      return res.status(200).send(ps.map(p => p.toObject()));
+      return res.status(200).send(ps)
     })
     .catch(e => {
       self.log.error(e);
-      return res.status(500).send({error: e.message});
-    });
+      return res.status(500).send({error: e.message})
+    })
+  })
 
-  });
+
+
   // TODO Separate - 'setup_mongo_merchant.js' from 'generate_hd_wallet.js'
-  // TODO Allow 'xpub' as arg to 'setup_mongo_merchant.js'
+  // TODO Allow 'xpub' as arg to 'setup_mongo_merchant.js' using commander
 
   // INPUTS - {price_satoshis: 1, name: 'x'}
   app.post('/products', verifyKey, function(req, res, next) {
@@ -152,8 +177,7 @@ PizzaShop.prototype.setupRoutes = function(app, express) {
 
   });
   // TODO Admin panel - my xpub, my products, txs
-  // TODO unique Product names
-
+  // TODO require distinct Product names (mongoose 'unique: true')
 
 };
 
@@ -166,14 +190,6 @@ PizzaShop.prototype.getRoutePrefix = function() {
 
 // TODO watching z addrs - use viewing key - 'zkY4fCSnTUC7fWiPSduJC2kXGMMcRgDsiAv8C7mdWYnLUxRWVh1ocq4XuGzZSDQAu7mqzJGbFPcEeupnWUL2NUv615J38om'
 // Products, from DB (mocked)
-
-// TODO fetch - GET /products
-let products = [{_id: 'pid1', btcp_address: 'b1HGkrggGcajysjervsPqQVAB53tgAFGwKW', price_satoshis: 100}];
-
-
-//, {_id: 'pid2', address: 'b1xy', price_satoshis: 200}];
-let addresses = products.map(p => { return p.btcp_address; }); 
-console.log(addresses);
 
 
 function updateSocketSubscriptions(addresses) {
@@ -190,7 +206,7 @@ function unsubscribeToAll() {
 }
 
 let socket;
-function startSocket(url) {
+function startSocket(url, addresses) {
     var self = this;
     // Connect to socket.io
     socket = io(hostURL);
