@@ -7,6 +7,7 @@ const DUMMY_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 mongoose.Promise = require('bluebird'); //finally()
 
 const Merchant = require('./models.js').Merchant;
+const BlockManager = require('./models.js').BlockManager;
 const Product = require('./models.js').Product;
 
 // BTCP - BIP44 + BIP39 / HD wallet setup
@@ -33,9 +34,21 @@ var derivedXpubkey = derivedHDPublicKey.xpubkey.toString();
 // Connect to MongoDB
 mongoose.connect(DUMMY_MONGO_URL);
 
-// Store derived xpub (for address generation) in only one mongodb Merchant
-Merchant.findOne({})
+// Create only one mongodb BlockManager
+BlockManager.findOne({})
 .exec()
+.then(bm => {
+  if (bm) {
+    console.warn('Already have a BlockManager... skipping creation');
+    return mongoose.Promise.resolve(bm);
+  } else {
+    return BlockManager.create({});
+  }
+})
+.then(bm => {
+  // Create only one mongodb Merchant to store derived xpub (for address generation)
+  return Merchant.findOne({}).exec()
+})
 .then(m => {
   if (m) {
     // Update/Replace?

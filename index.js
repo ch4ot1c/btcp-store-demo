@@ -10,6 +10,7 @@ mongoose.Promise = require('bluebird');
 global.Promise = mongoose.Promise;
 
 const Merchant = require('./models').Merchant;
+const BlockManager = require('./models').BlockManager;
 const Transaction = require('./models').Transaction;
 const Product = require('./models').Product;
 
@@ -41,19 +42,19 @@ function PizzaShop(options) {
 
   //TODO check that other necessary services are started first
   this.node.services.bitcoind.on('tip', function (h) {
-    self.log.info('tip');
-    self.log.info(h);
+    self.log.info('Event - tip: ', h);
 
-    BlockManager.findOneAndUpdate({}, { latest_block_height: h }, { returnNewDocument: true })
+    BlockManager.findOneAndUpdate({}, { known_tip_height: h }, { new: true })
       .exec()
       .then(m => {
         if (!m) {
           return Promise.reject('BlockManager doesn\'t exist!!! Run `node init_mongo` offline.');
         } else {
-          let maxHeight = self.node.services.bitcoind.height;
-          self.log.info('Max Height:' + maxHeight);
+          //let maxHeight = self.node.services.bitcoind.height;
+          //self.log.info('Height: ' + maxHeight);
+          //self.log.info(m.known_tip_height);
           // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
-          return Transaction.find({ block_mined: { $gte: m.latest_block_height - NUM_CONFIRMATIONS } }).exec()
+          return Transaction.find({ block_mined: { $gte: m.known_tip_height - NUM_CONFIRMATIONS } }).exec()
         }
       })
       .then(ts => {
@@ -73,12 +74,13 @@ function PizzaShop(options) {
     self.log.info(blockHashHex);
 
     // Increment block height for this currency
-    BlockManager.findOneAndUpdate({}, { $inc: { latest_block_height: 1 } }, { returnNewDocument: true })
+    //TODO hmm only need to do this once, on tip?
+    BlockManager.findOneAndUpdate({}, { $inc: { known_tip_height: 1 } }, { new: false })
       .exec()
       .then(b => {
         if (!b) { self.log.error('No BlockManager in Mongo!'); return; }
         // Broadcast block
-        self.node.services.web.io.emit('BLOCK_SEEN', { height: b.latest_block_height, hash: blockHashHex });
+        self.node.services.web.io.emit('BLOCK_SEEN', { height: b.known_tip_height, hash: blockHashHex });
         // Update + Broadcast Transactions that are now fully confirmed
         // TODO
         // (unsubscribe from sender addresses that have no other txs pending)
@@ -277,7 +279,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
 
     // Generate next address & create a Product 
     // (DB starts at next_address_index `0`, and post-increments)
-    Merchant.findOneAndUpdate({}, { $inc: { next_address_index: 1 } }, { returnNewDocument: false })
+    Merchant.findOneAndUpdate({}, { $inc: { next_address_index: 1 } }, { returnOriginal: false })
       .select('next_address_index')
       .exec()
       .then(m => {
