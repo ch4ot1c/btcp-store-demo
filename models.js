@@ -12,10 +12,10 @@ var MerchantSchema = new Schema({
 var Merchant = mongoose.model('Merchant', MerchantSchema);
 
 // --- BlockManager ---
-// If a restart is required, we rescan from last_block_height to ensure no txs are missed
+// If a restart is required, we scan forward from known_tip_height to ensure no txs are missed
 
 var BlockManagerSchema = new Schema({
-  last_block_height: {type: String, required: true, default: 0},
+  known_tip_height: {type: String, required: true, default: 0},
 }, {timestamps: true});
 
 var BlockManager = mongoose.model('BlockManager', BlockManagerSchema);
