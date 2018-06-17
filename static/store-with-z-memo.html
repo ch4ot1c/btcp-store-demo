@@ -10,41 +10,52 @@
 <body>
   <!-- TODO topbar red - Don't forget your email address in the memo! Otherwise your item may not be deliverable! -->
   <h1>Pizza Shop</h1>
+<!--
   <h2>To shop here, you will need to send a special type of transaction.</h2>
   <p>Use the <a>BTCP Full Node Desktop Wallet</a> to send a shielded memo containing **your email address**. This will be used to deliver your receipt receipt / digital goods.</p>
+-->
+<!--
   <button onclick="document.getElementById('reveal').style.display = 'block';">OK</button>
-
-  <!-- CAN ALL BE DONE WATCHING 1 Z ADDR PER PRODUCT - index by 'memo' email -->
-  <!-- (Offload accounting to MongoDB) -->
+-->
+<!-- CAN ALL BE DONE WATCHING 1 Z ADDR PER PRODUCT - index by 'memo' email -->
 
   <div id="reveal" style="display:none;">
-    <h2>{{product.name}}</h2>
-    <p>To Buy - Pay <b>{{product.price_satoshis}} BTCP</b> to <b>{{product.address}}</b>.</p>
     <b>Don't forget to put your EMAIL in the memo field of your shielded transaction - otherwise you cannot get a receipt / download link!!!</b> 
-    <!-- TODO UI for a outer glow (on socket events)-->
   </div>
   
   <div id="products"></div>
-
-
+  <!-- TODO UI for a glow (on socket events)-->
 <script>
+
 /* Handle client-side events, as provided by a trusted daemon + bitcore node over socket.io */
 /* WARNING: If the daemon and/or the bitcoin node are down, payments will not process!!! */
 
 var bitcore = require('bitcore-lib')
 
-let hostURL = 'ec2-34-220-228-43.us-west-2.compute.amazonaws.com:8001'
+let hostURL = 'ec2-54-186-92-171.us-west-2.compute.amazonaws.com:8001'
 
+var self = this
+var pendingTransactions = []
 fetch('http://' + hostURL + '/store-demo/products')
 .then(res => {
   return res.json()
 })
 .then(data => {
   let products = data
-  let productsRaw = JSON.stringify(data, null, 2);
-  document.getElementById('products').innerHTML = productsRaw 
+  products.forEach(p => {
+    console.log(p)
+    //let productsRaw = JSON.stringify(data, null, 2);
+    let productElem = document.createElement('p') 
+    productElem.id = p._id
+    productElem.textContent = p.name + " (" + (p.price_satoshis / 1e8) + " BTCP): " + p.address_btcp
+    let confirmationsElem = document.createElement('p')
+    confirmationsElem.className = 'confirmations'
+    productElem.appendChild(confirmationsElem)
 
-  startSocket(hostURL, products);
+    document.getElementById('products').appendChild(productElem)
+
+    startSocket(hostURL, products);
+  })
 })
 
 /*
@@ -81,22 +92,34 @@ function startSocket(url, products) {
     socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
 
     products.forEach(p => {
-      socket.on('PAID_ENOUGH_' + p.id, t => {
-        console.log('PAID_ENOUGH_' + p.id + ':' + t.id);
+      socket.on('PAID_ENOUGH_' + p._id, t => {
+        console.log('PAID_ENOUGH_' + p._id + ':' + t.id);
+        pendingTransactions.push(t)
       })
-      socket.on('PAID_NOT_ENOUGH_' + p.id, t => {
-        console.log('PAID_NOT_ENOUGH_' + p.id + ':' + t.id);
+      socket.on('PAID_NOT_ENOUGH_' + p._id, t => {
+        console.log('PAID_NOT_ENOUGH_' + p._id + ':' + t.id);
+        pendingTransactions.push(t)
       })
     })
 
     // Tip, as syncd by the backend bitcore node
-    socket.on('BLOCK_SEEN', o => {
+    // (Shouldn't need for any front-end processing,
+    // just for incrementing pending confirmations)
+    socket.on('BLOCK_SEEN', function(o) {
       console.log('BLOCK_SEEN:' + ': ' + o.height);
-
+      pendingTransactions.forEach(t => {
+        t.confirmations = o.height - t.block_mined
+      })
+      Array.from(self.document.getElementsByClassName('confirmations')).forEach(function(c) {
+        let t = pendingTransactions.filter(t => { console.log(t.product_id); console.log(c.parentNode.id); return t.product_id === c.parentNode.id })[0]
+        c.innerHTML = t ? t.confirmations : c.innerHTML
+      })
     })
+
 
     // Handle -
 
+/*
     socket.on('bitcoind/hashblock', function(blockHashHex) {
       console.info('bitcoind/hashblock');
       console.log(blockHashHex);
@@ -173,6 +196,7 @@ function startSocket(url, products) {
            }
         }
     });
+*/
 }
 
 function displayProcessingMessage() {

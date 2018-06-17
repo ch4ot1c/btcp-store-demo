@@ -40,7 +40,8 @@ var TransactionSchema = new Schema({
   satoshis: {type: Number, required: true},
   blockchain_tx_id: String,
   // Eventually...
-  block_mined: Number
+  block_mined: Number,
+  block_confirmed: Number
 }, {timestamps: true});
 
 var Transaction = mongoose.model('Transaction', TransactionSchema);
