@@ -3,8 +3,8 @@
 <head>
   <title>Pizza Shop</title>
   <base href="{{baseUrl}}" />
-  <script src="js/socket.io-client/socket.io.js"></script>
-  <script src="js/bitcore-lib/bitcore-lib.js"></script>
+  <script src="js/socket.io.js"></script>
+  <script src="js/bitcore-lib.js"></script>
 </head>
 
 <body>
@@ -22,35 +22,40 @@
     <p>To Buy - Pay <b>{{product.price_satoshis}} BTCP</b> to <b>{{product.address}}</b>.</p>
     <b>Don't forget to put your EMAIL in the memo field of your shielded transaction - otherwise you cannot get a receipt / download link!!!</b> 
     <!-- TODO UI for a outer glow (on socket events)-->
-    <!-- TODO Display Multiple Products --> 
   </div>
+  
+  <div id="products"></div>
 
 
 <script>
 /* Handle client-side events, as provided by a trusted daemon + bitcore node over socket.io */
 /* WARNING: If the daemon and/or the bitcoin node are down, payments will not process!!! */
 
-var bitcore = require('bitcore-lib');
+var bitcore = require('bitcore-lib')
 
-let socketURL = 'ec2-54-245-190-72.us-west-2.compute.amazonaws.com:8001';
+let hostURL = 'ec2-34-220-228-43.us-west-2.compute.amazonaws.com:8001'
 
+fetch('http://' + hostURL + '/store-demo/products')
+.then(res => {
+  return res.json()
+})
+.then(data => {
+  let products = data
+  let productsRaw = JSON.stringify(data, null, 2);
+  document.getElementById('products').innerHTML = productsRaw 
 
-// TODO watching z addrs - use viewing key - 'zkY4fCSnTUC7fWiPSduJC2kXGMMcRgDsiAv8C7mdWYnLUxRWVh1ocq4XuGzZSDQAu7mqzJGbFPcEeupnWUL2NUv615J38om'
-// Products, from DB (mocked)
-// TODO fetch - GET /products
-let products = [{_id: 'pid1', address: 'b1HGkrggGcajysjervsPqQVAB53tgAFGwKW', price_satoshis: 100}, {_id: 'pid2', address: 'b1xy', price_satoshis: 200}];
+  startSocket(hostURL, products);
+})
 
-// Payments & Confirmations Log
-// productAddress - userAddress mapping
-// TODO Should match DB, so if server goes down, pending address continues to be watched for nth confirm upon reconnect.
-let confirms = {};
-for (let o in products) {
-  confirms[o.address] = {addr: null, txID: null, num: 0, confirmedSatoshis: 0, unconfirmedSatoshis: 0};
-} 
-// EXAMPLE - let confirms = [{b1aa: {num: 0, confirmedSatoshis: 0, unconfirmedSatoshis: 0}}]
+/*
+socket.on('tip', t => {
+  console.log(t)
+})
 
+socket.on('hashblock', h => {
 
-startSocket(socketURL);
+})
+*/
 
 function updateSocketSubscriptions(addresses) {
     //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid', addresses);
@@ -64,16 +69,31 @@ function unsubscribeToAll() {
     //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid');
 }
 
-function startSocket(url) {
+function startSocket(url, products) {
     // Connect to socket.io, which Bitcore forwards from the indexing daemon's ZMQ
-    socket = io('//' + socketURL);
+    socket = io('//' + hostURL);
 
     // Subscribe to hashblock, rawtransaction, and addresstxid channels
     socket.emit('subscribe', 'bitcoind/hashblock');
     socket.emit('subscribe', 'bitcoind/rawtransaction');
 
-    let addresses = products.map(p => { return p.address; }); 
+    let addresses = products.map(p => { return p.btcp_address; }); 
     socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
+
+    products.forEach(p => {
+      socket.on('PAID_ENOUGH_' + p.id, t => {
+        console.log('PAID_ENOUGH_' + p.id + ':' + t.id);
+      })
+      socket.on('PAID_NOT_ENOUGH_' + p.id, t => {
+        console.log('PAID_NOT_ENOUGH_' + p.id + ':' + t.id);
+      })
+    })
+
+    // Tip, as syncd by the backend bitcore node
+    socket.on('BLOCK_SEEN', o => {
+      console.log('BLOCK_SEEN:' + ': ' + o.height);
+
+    })
 
     // Handle -
 

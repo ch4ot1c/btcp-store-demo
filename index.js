@@ -44,23 +44,25 @@ function PizzaShop(options) {
   this.node.services.bitcoind.on('tip', function (h) {
     self.log.info('Event - tip: ', h);
 
+    // TODO make sure incr'd one; if not, account.
     BlockManager.findOneAndUpdate({}, { known_tip_height: h }, { new: true })
       .exec()
       .then(m => {
         if (!m) {
           return Promise.reject('BlockManager doesn\'t exist!!! Run `node init_mongo` offline.');
         } else {
+          // Broadcast saved Block Height
+          self.node.services.web.io.emit('BLOCK_SEEN', { height: m.known_tip_height });
           //let maxHeight = self.node.services.bitcoind.height;
-          //self.log.info('Height: ' + maxHeight);
-          //self.log.info(m.known_tip_height);
-          // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
+
           return Transaction.find({ block_mined: { $gte: m.known_tip_height - NUM_CONFIRMATIONS } }).exec()
         }
       })
       .then(ts => {
         ts.forEach(t => {
+          // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
           self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
-          //TODO 'required_confirms: n-blocks' in Transaction model? Set?
+          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
           //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id?
         })
       })
@@ -158,7 +160,6 @@ function PizzaShop(options) {
       awaitConfirmations(self.node.services.web.io, p.id, p.address_btcp, t.txid);
     }
   });
-
 
   // ** Begin **
 
