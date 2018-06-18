@@ -2,7 +2,7 @@
 
 var EventEmitter = require('events').EventEmitter;
 const fs = require('fs');
-const bitcore = require('bitcore-lib');
+const bitcore = require('bitcore-lib-btcp');
 const bodyParser = require('body-parser');
 
 const mongoose = require('mongoose');
@@ -26,7 +26,7 @@ const hostURL = 'ws://localhost:8001';
 // EXAMPLE - `localhost:8001/store-demo/index.html`
 
 let xpub
-let addresses = []
+let products = []
 
 function PizzaShop(options) {
   EventEmitter.call(this);
@@ -86,7 +86,9 @@ function PizzaShop(options) {
       // Find our address in that output 
       let a = bitcore.Address.fromScript(bitcore.Script.fromBuffer(o[i]._scriptBuffer)).toString();
       // Handle only txs corresponding to products' addresses
-      let product = addresses.filter(x => { x === a })[0];
+      self.log.info(a)
+      //self.log.info(self.products)
+      let product = self.products.filter(x => { return x.address_btcp === a })[0];
       if (product) { 
         p = product;
         break;
@@ -107,6 +109,7 @@ function PizzaShop(options) {
       self.log.error('You have paid ' + (difference / 100000000).toFixed(8) + ' BTCP too little.\n\nYour transaction will not be processed, but should be saved in the merchant\'s database.');
       self.log.error('Payment Issue! - TODO ELEGANT HANDLING');
 
+      self.log.info(t)
       socket.emit('PAID_NOT_ENOUGH_' + p._id, { transaction: t });
 
       return;
@@ -116,14 +119,20 @@ function PizzaShop(options) {
       // Set amount overpaid and alert user
       let difference = o[i].satoshis - p.price_satoshis;
       self.log.error('You have paid ' + (difference / 100000000).toFixed(8) + ' BTCP too much.\n\nPlease contact merchant to discuss any partial refund.');
-      self.log.warning('Payment Issue! - TODO ELEGANT HANDLING');
+      self.log.warn('Payment Issue! - TODO ELEGANT HANDLING');
       //TODO - For now, their overpayment is accepted as a donation
 
-      awaitConfirmations(self.node.services.web.io, p._id, p.address_btcp, t.blockchain_txid);
+      
+      self.log.info(JSON.stringify(t.inputs))
+      let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
 
       // Paid exact amount
     } else {
-      awaitConfirmations(self.node.services.web.io, p._id, p.address_btcp, t.blockchain_txid);
+      self.log.info(t.inputs)
+      //TODO multiple input addrs
+      let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
     }
   });
 
@@ -146,7 +155,7 @@ function PizzaShop(options) {
           }
         })
         .then(() => {
-          return getAllProducts().then(ps => { self.addresses = ps.map(p => p.btcp_address); }).catch(e => { self.log.error(e) })
+          return getAllProducts().then(ps => { self.products = ps }).catch(e => { self.log.error(e) })
         })
         .catch(e => {
           self.log.error(e);
@@ -156,19 +165,21 @@ function PizzaShop(options) {
   // TODO elegantly disconnect mongoose, socket.io
 }
 
-function awaitConfirmations(socket, productID, address, blockchainTxID) {
+function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID) {
   let tJSON = {
-    product_id: productID,
-    user_address: address,
-    satoshis: o[i].satoshis,
+    product_id: product._id,
+    user_address: whoPaid,
+    receiving_address: product.address_btcp,
+    satoshis: amountPaid, 
     blockchain_tx_id: blockchainTxID
   }
   Transaction.create(tJSON)
     .then(t => {
-      socket.emit('PAID_ENOUGH_' + productID, { transaction: t });
+      log.info(t);
+      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t });
     })
     .catch(e => {
-      console.error(e.message);
+      log.error(e);
     });
 }
 

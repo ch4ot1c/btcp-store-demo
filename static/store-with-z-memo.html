@@ -25,6 +25,7 @@
   
   <div id="products"></div>
   <!-- TODO UI for a glow (on socket events)-->
+
 <script>
 
 /* Handle client-side events, as provided by a trusted daemon + bitcore node over socket.io */
@@ -92,13 +93,14 @@ function startSocket(url, products) {
     socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
 
     products.forEach(p => {
-      socket.on('PAID_ENOUGH_' + p._id, t => {
-        console.log('PAID_ENOUGH_' + p._id + ':' + t.id);
-        pendingTransactions.push(t)
+      socket.on('PAID_ENOUGH_' + p._id, json => {
+        console.log(json)
+        console.log('PAID_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
+        pendingTransactions.push(json.transaction)
       })
-      socket.on('PAID_NOT_ENOUGH_' + p._id, t => {
-        console.log('PAID_NOT_ENOUGH_' + p._id + ':' + t.id);
-        pendingTransactions.push(t)
+      socket.on('PAID_NOT_ENOUGH_' + p._id, json => {
+        console.log('PAID_NOT_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
+        pendingTransactions.push(json.transaction)
       })
     })
 
@@ -156,8 +158,9 @@ function startSocket(url, products) {
 
     socket.on('bitcoind/rawtransaction', function(transactionHex) {
         console.info('bitcoind/rawtransaction');
+        var tx = bitcore.Transaction(transactionHex)
         // Get outputs
-        var o = bitcore.Transaction(transactionHex).outputs;
+        var o = tx.outputs;
         // Find our address in that tx block
         for (var i = 0; i < o.length; i++) {
             let a = bitcore.Address.fromScript(bitcore.Script.fromBuffer(o[i]._scriptBuffer)).toString(); 
