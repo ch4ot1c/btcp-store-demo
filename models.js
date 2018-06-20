@@ -5,39 +5,51 @@ var ObjectId = mongoose.Schema.Types.ObjectId;
 // --- Merchant ---
 
 var MerchantSchema = new Schema({
-  merchant_id: {type: Number, required: true},
-  wallet_id: {type: Number, required: true},
   xpub: {type: String, required: true},
-  address_index: {type: Number, default: 0}
+  next_address_index: {type: Number, default: 0} 
 }, {timestamps: true});
 
 var Merchant = mongoose.model('Merchant', MerchantSchema);
 
-// --- Invoice ---
+// --- BlockManager ---
+// If a restart is required, we scan forward from known_tip_height to ensure no txs are missed
 
-// TODO - look into using ObjectId as the type? Better to keep as INT tho?
-var InvoiceSchema = new Schema({
-  invoice_id: {type: Number, required: true},
-  merchant_id: {type: Number, required: true},
-  total_satoshis: {type: Number, required: true},
-  address_index: {type: Number, required: true},
-  merchant_address: String,
-  user_address: String,
-  blockchain_tx_id: String
+var BlockManagerSchema = new Schema({
+  known_tip_height: {type: String, required: true, default: 0},
 }, {timestamps: true});
 
-var Invoice = mongoose.model('Invoice', InvoiceSchema);
+var BlockManager = mongoose.model('BlockManager', BlockManagerSchema);
 
 // --- Product ---
 
 var ProductSchema = new Schema({
-  product_id: {type: Number, required: true},
-  invoice_id: {type: Number, required: true},
-  description: String,
-  price_satoshis: {type: Number, required: true}
+  price_satoshis: {type: Number, required: true},
+  address_btcp: {type: String, required: true},
+  address_index: {type: String, required: false},
+  name: {type: String, required: true}
 }, {timestamps: true});
 
 var Product = mongoose.model('Product', ProductSchema);
 
+// --- Transaction - Added once first seen (if relevant) ---
 
-module.exports = {Merchant: Merchant, Invoice: Invoice, Product: Product};
+var TransactionSchema = new Schema({
+  product_id: {type: ObjectId, ref: 'Product', index: true, required: true},
+  receiving_address: {type: String, required: true},
+  user_address: String,
+  satoshis: {type: Number, required: true},
+  blockchain_tx_id: String,
+  // Eventually...
+  block_mined: Number,
+  block_confirmed: Number
+}, {timestamps: true});
+
+var Transaction = mongoose.model('Transaction', TransactionSchema);
+
+
+module.exports = {
+  Merchant: Merchant,
+  Product: Product,
+  Transaction: Transaction,
+  BlockManager: BlockManager
+};

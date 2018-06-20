@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pizza Shop</title>
+  <base href="{{baseUrl}}" />
+  <script src="js/socket.io.js"></script>
+  <script src="js/bitcore-lib.js"></script>
+</head>
+
+<body>
+  <!-- TODO topbar red - Don't forget your email address in the memo! Otherwise your item may not be deliverable! -->
+  <h1>Pizza Shop</h1>
+<!--
+  <h2>To shop here, you will need to send a special type of transaction.</h2>
+  <p>Use the <a>BTCP Full Node Desktop Wallet</a> to send a shielded memo containing **your email address**. This will be used to deliver your receipt receipt / digital goods.</p>
+-->
+<!--
+  <button onclick="document.getElementById('reveal').style.display = 'block';">OK</button>
+-->
+<!-- CAN ALL BE DONE WATCHING 1 Z ADDR PER PRODUCT - index by 'memo' email -->
+
+  <div id="reveal" style="display:none;">
+    <b>Don't forget to put your EMAIL in the memo field of your shielded transaction - otherwise you cannot get a receipt / download link!!!</b> 
+  </div>
+  
+  <div id="products"></div>
+  <!-- TODO UI for a glow (on socket events)-->
+
+<script>
+
+/* Handle client-side events, as provided by a trusted daemon + bitcore node over socket.io */
+/* WARNING: If the daemon and/or the bitcoin node are down, payments will not process!!! */
+
+var bitcore = require('bitcore-lib')
+
+let hostURL = 'ec2-54-186-92-171.us-west-2.compute.amazonaws.com:8001'
+
+var self = this
+var pendingTransactions = []
+fetch('http://' + hostURL + '/store-demo/products')
+.then(res => {
+  return res.json()
+})
+.then(data => {
+  let products = data
+  products.forEach(p => {
+    console.log(p)
+    //let productsRaw = JSON.stringify(data, null, 2);
+    let productElem = document.createElement('p') 
+    productElem.id = p._id
+    productElem.textContent = p.name + " (" + (p.price_satoshis / 1e8) + " BTCP): " + p.address_btcp
+    let confirmationsElem = document.createElement('p')
+    confirmationsElem.className = 'confirmations'
+    productElem.appendChild(confirmationsElem)
+
+    document.getElementById('products').appendChild(productElem)
+
+    startSocket(hostURL, products);
+  })
+})
+
+/*
+socket.on('tip', t => {
+  console.log(t)
+})
+
+socket.on('hashblock', h => {
+
+})
+*/
+
+function updateSocketSubscriptions(addresses) {
+    //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid', addresses);
+    socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
+}
+
+function unsubscribeToAll() {
+    // Subscribe to hashblock, rawtransaction, and addresstxid channels
+    socket.emit('unsubscribe', 'bitcoind/hashblock');
+    socket.emit('unsubscribe', 'bitcoind/rawtransaction');
+    //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid');
+}
+
+function startSocket(url, products) {
+    // Connect to socket.io, which Bitcore forwards from the indexing daemon's ZMQ
+    socket = io('//' + hostURL);
+
+    // Subscribe to hashblock, rawtransaction, and addresstxid channels
+    socket.emit('subscribe', 'bitcoind/hashblock');
+    socket.emit('subscribe', 'bitcoind/rawtransaction');
+
+    let addresses = products.map(p => { return p.btcp_address; }); 
+    socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
+
+    products.forEach(p => {
+      socket.on('PAID_ENOUGH_' + p._id, json => {
+        console.log(json)
+        console.log('PAID_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
+        pendingTransactions.push(json.transaction)
+      })
+      socket.on('PAID_NOT_ENOUGH_' + p._id, json => {
+        console.log('PAID_NOT_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
+        pendingTransactions.push(json.transaction)
+      })
+    })
+
+    // Tip, as syncd by the backend bitcore node
+    // (Shouldn't need for any front-end processing,
+    // just for incrementing pending confirmations)
+    socket.on('BLOCK_SEEN', function(o) {
+      console.log('BLOCK_SEEN:' + ': ' + o.height);
+      pendingTransactions.forEach(t => {
+        t.confirmations = o.height - t.block_mined
+      })
+      Array.from(self.document.getElementsByClassName('confirmations')).forEach(function(c) {
+        let t = pendingTransactions.filter(t => { console.log(t.product_id); console.log(c.parentNode.id); return t.product_id === c.parentNode.id })[0]
+        c.innerHTML = t ? t.confirmations : c.innerHTML
+      })
+    })
+
+
+    // Handle -
+
+/*
+    socket.on('bitcoind/hashblock', function(blockHashHex) {
+      console.info('bitcoind/hashblock');
+      console.log(blockHashHex);
+
+      // Increase number of confirms
+      //let pending = confirms.filter(x => { return addresses.includes(x.address) && confirms.buyerAddresses[x.address] < 6; }));
+      confirms.forEach((c, i) => {
+	c.num++;
+	if (c.num < 6) {
+	  console.log(c);
+	  if (c.num === 0) {
+	    console.log('Received initial block for ' + JSON.stringify(c));
+	  }
+	} else {
+	  onPaymentConfirmed(c);
+	  //TODO prune completed items
+	}
+      });
+    });
+
+    socket.on('bitcoind/addresstxid', function(data) {
+      console.info('bitcoind/addresstxid');
+      // Get and confirm address
+      let bitcoreAddress = bitcore.Address(data.address); //TODO z addrs
+      let a = bitcoreAddress.toString();
+      if (addresses.includes(a)) { // redundant?
+          console.log(a);
+          console.log(data.txid);
+          confirms[a].txID = data.txid; //TODO ignore double payment?
+
+          displayProcessingMessage();
+       }
+    });
+
+    socket.on('bitcoind/rawtransaction', function(transactionHex) {
+        console.info('bitcoind/rawtransaction');
+        var tx = bitcore.Transaction(transactionHex)
+        // Get outputs
+        var o = tx.outputs;
+        // Find our address in that tx block
+        for (var i = 0; i < o.length; i++) {
+            let a = bitcore.Address.fromScript(bitcore.Script.fromBuffer(o[i]._scriptBuffer)).toString(); 
+            // Handle only txs corresponding to some product's address
+            if (addresses.includes(a)) { // redundant?
+              let p = products.filter(x => { return x.address === a; })[0];
+
+              // Check user has paid correct amount -
+              // Three Cases - too little, too much, exact amount
+              // Default Forgiveness Threshold = 5000 sats
+              const FORGIVENESS_SATOSHIS = 5000;
+
+              // Paid too little (5000 sats or less under required amount)
+              if (o[i].satoshis < p.price_satoshis - FORGIVENESS_SATOSHIS) {
+                // Set amount to pay and alert user
+                let difference = p.price_satoshis - o[i].satoshis;
+                alert('You have paid '+(difference/100000000).toFixed(8)+' BTCP too little.\n\nYour transaction will not be processed, but should be saved in the merchant\'s database.');
+                console.error('PAYMENT ISSUE - TODO ELEGANT HANDLING');
+                //TODO elegant handling
+              // Paid too much
+              } else if (o[i].satoshis > p.price_satoshis) {
+                // Set amount overpaid and alert user
+                let difference = o[i].satoshis - p.price_satoshis;   
+                alert('You have paid '+(difference/100000000).toFixed(8)+' BTCP too much.\n\nPlease contact merchant to discuss any partial refund.');
+                console.warn('PAYMENT ISSUE - TODO ELEGANT HANDLING');
+                //TODO elegant handling
+                //TODO for now, their overpayment is accepted as a donation
+
+                // Permit order to proceed
+                displayProcessingMessage();
+              // Paid correct amount
+              } else {
+                displayProcessingMessage();
+              }
+              break;
+           }
+        }
+    });
+*/
+}
+
+function displayProcessingMessage() {
+  console.log('Processing Payment from ' + a);
+  //TODO
+};
+
+// If srv, deliver and mark 'delivered' in DB, for this user
+// If client, show visual 
+function onPaymentConfirmed(c) {
+  console.log(c.addr);
+  //TODO console.log(txid);
+  //TODO
+};
+
+</script>
+
+</body>
+
+</html>
+
+

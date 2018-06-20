@@ -1,36 +1,32 @@
 'use strict';
 
-// Output error according to our processScope
-var outputError = function(error) {
-  console.log(
-    'Error: '+error+
-    ' for merchant ID: '+req.query.merchantid+
-    ', wallet ID: '+req.query.walletid+
-    ', derived xpub: '+req.query.derivedxpud
-  );
-  return
-    '{\n'+
-    '  "status"        : "error",\n'+
-    '  "statusMessage" : "'+error+'"\n'+
-    '}'
-}
-
 var EventEmitter = require('events').EventEmitter;
 const fs = require('fs');
-const bitcore = require('bitcore-lib');// BROKEN BIP32!!!
+const bitcore = require('bitcore-lib-btcp');
 const bodyParser = require('body-parser');
+
 const mongoose = require('mongoose');
-var path = require("path");
-var exec = require('child_process').exec;
-
-var config = require('read-config')(path.join(__dirname, 'config.json'));
-
-//const io = require('socket.io');
+mongoose.Promise = require('bluebird');
+global.Promise = mongoose.Promise;
 
 const Merchant = require('./models').Merchant;
-const Invoice = require('./models').Invoice;
+const BlockManager = require('./models').BlockManager;
+const Transaction = require('./models').Transaction;
 const Product = require('./models').Product;
-const DUMMY_MONGO_URL = 'mongodb://localhost:27017/store-demo';
+
+//TODO relocate
+const SERVER_SECRET = 'key';
+
+const NUM_CONFIRMATIONS = 6;
+
+const DEFAULT_MONGO_URL = 'mongodb://localhost:27017/store-demo';
+const hostURL = 'ws://localhost:8001';
+
+// This module will be installed as a service of Bitcore, which will be running on localhost:8001.
+// EXAMPLE - `localhost:8001/store-demo/index.html`
+
+let xpub
+let products = []
 
 function PizzaShop(options) {
   EventEmitter.call(this);
@@ -38,245 +34,269 @@ function PizzaShop(options) {
   this.node = options.node;
   this.log = this.node.log;
 
-  this.invoiceHtml = fs.readFileSync(__dirname + '/invoice.html', 'utf8');
+  //this.log.info(require('util').inspect(self.node));
 
-  // Connect to MongoDB
-  mongoose.connect(options.mongoURL || DUMMY_MONGO_URL, null)
-  .then(() => {
+  var self = this;
 
-    Merchant.findOne({})
-    .select('xpub')
-    .exec()
-    .then(m => {
-      if (!m || m.xpub == null) {
-        return mongoose.Promise.reject("xpub hasn't been set!!! Run `node generate_hd_wallets` offline.");
-      } else {
-        this.xpub = m.xpub;
+  // ** Watch for Bitcore Events **
+
+  //TODO check that other necessary services are started first
+  //TODO more events - 'ready', 'syncd', 'error'
+  this.node.services.bitcoind.on('tip', function (h) {
+    self.log.info('Event - tip: ', h);
+
+    // TODO make sure incr'd one; if not, account.
+    BlockManager.findOneAndUpdate({}, { known_tip_height: h }, { new: true })
+      .exec()
+      .then(m => {
+        if (!m) {
+          return Promise.reject('BlockManager doesn\'t exist!!! Run `node init_mongo` offline.');
+        } else {
+          // Broadcast saved Block Height
+          self.node.services.web.io.emit('BLOCK_SEEN', { height: m.known_tip_height });
+          //let maxHeight = self.node.services.bitcoind.height;
+
+          return Transaction.find({ block_mined: { $gte: m.known_tip_height - NUM_CONFIRMATIONS } }).exec()
+        }
+      })
+      .then(ts => {
+        ts.forEach(t => {
+          // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
+          self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
+          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
+          //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id?
+        })
+      })
+      .catch(e => {
+        self.log.error(e);
+      })
+  });
+ 
+  this.node.services.bitcoind.on('tx', function (transactionHex) {
+    self.log.info('Event - tx');
+    //self.log.info(transactionHex);
+    // Get outputs
+    let t = bitcore.Transaction(transactionHex);
+    //console.log(t);
+    let o = t.outputs;
+    //console.log(o);
+
+    let p;
+    for (var i = 0; i < o.length; i++) {
+      // Find our address in that output 
+      let a = bitcore.Address.fromScript(bitcore.Script.fromBuffer(o[i]._scriptBuffer)).toString();
+      // Handle only txs corresponding to products' addresses
+      self.log.info(a)
+      //self.log.info(self.products)
+      let product = self.products.filter(x => { return x.address_btcp === a })[0];
+      if (product) { 
+        p = product;
+        break;
       }
+    }
+
+    if (!p) { return; }
+
+    // Check whether user has paid enough -
+    // Three Cases - too little, too much, exact amount
+    // Default Forgiveness Threshold = 5000 sats
+    const FORGIVENESS_SATOSHIS = 5000;
+
+    // Paid too little (5000 sats or less under required amount)
+    if (o[i].satoshis < p.price_satoshis - FORGIVENESS_SATOSHIS) {
+      // Set amount to pay and alert user
+      let difference = p.price_satoshis - o[i].satoshis;
+      self.log.error('You have paid ' + (difference / 100000000).toFixed(8) + ' BTCP too little.\n\nYour transaction will not be processed, but should be saved in the merchant\'s database.');
+      self.log.error('Payment Issue! - TODO ELEGANT HANDLING');
+
+      self.log.info(t)
+      socket.emit('PAID_NOT_ENOUGH_' + p._id, { transaction: t });
+
+      return;
+
+      // Paid too much
+    } else if (o[i].satoshis > p.price_satoshis) {
+      // Set amount overpaid and alert user
+      let difference = o[i].satoshis - p.price_satoshis;
+      self.log.error('You have paid ' + (difference / 100000000).toFixed(8) + ' BTCP too much.\n\nPlease contact merchant to discuss any partial refund.');
+      self.log.warn('Payment Issue! - TODO ELEGANT HANDLING');
+      //TODO - For now, their overpayment is accepted as a donation
+
+      
+      self.log.info(JSON.stringify(t.inputs))
+      let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
+
+      // Paid exact amount
+    } else {
+      self.log.info(t.inputs)
+      //TODO multiple input addrs
+      let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
+    }
+  });
+
+
+  // ** Begin **
+
+  // Connect to MongoDB (Warning - connect() is Not a real Promise)
+  //TODO createConnection, global obj
+  mongoose.connect(options.mongoURL || DEFAULT_MONGO_URL)
+    .then(() => {
+      Merchant.findOne({})
+        .select('xpub')
+        .exec()
+        .then(m => {
+          if (!m || m.xpub == null) {
+            return Promise.reject('Merchant doesn\'t exist (and/or no xpub has been set)!!! Run `node init_mongo` offline.');
+          } else {
+            self.xpub = m.xpub;
+            return Promise.resolve();
+          }
+        })
+        .then(() => {
+          return getAllProducts().then(ps => { self.products = ps }).catch(e => { self.log.error(e) })
+        })
+        .catch(e => {
+          self.log.error(e);
+        });
+    }, e => { self.log.error(e.message); });
+
+  // TODO elegantly disconnect mongoose, socket.io
+}
+
+function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID) {
+  let tJSON = {
+    product_id: product._id,
+    user_address: whoPaid,
+    receiving_address: product.address_btcp,
+    satoshis: amountPaid, 
+    blockchain_tx_id: blockchainTxID
+  }
+  Transaction.create(tJSON)
+    .then(t => {
+      log.info(t);
+      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t });
     })
     .catch(e => {
-      this.log.error(e);
+      log.error(e);
     });
-  }, e => { this.log.error(e.message); });
-
-  //TODO Implement State Machine: AWAITING_PAYMENT -> FULL_AMOUNT_RECEIVED / TIMED_OUT / PARTIAL_AMOUNT_RECEIVED
-  //TODO reuse code from invoice.html (client)
-
-/* TODO socket config
-  var socket = io('http://localhost:8001');
-  socket.emit('subscribe', 'bitcoind/addresstxid', ['{{address}}']);
-  socket.on('bitcoind/addresstxid', function(data) {
-   var address = bitcore.Address(data.address);
-   this.log.info(address);
-     //TODO save an entry in db for each confirmed payment, for each relevant addr
-     // index (or address), tx_id, address_paid, amount_paid, latest_paid_time, total_satoshis
-  });
-*/
-
-  //TODO disconnect mongoose, socket.io
-
 }
+
+
 
 PizzaShop.dependencies = ['bitcoind'];
 
-PizzaShop.prototype.start = function(callback) {
+PizzaShop.prototype.start = function (callback) {
   setImmediate(callback);
 };
 
-PizzaShop.prototype.stop = function(callback) {
+PizzaShop.prototype.stop = function (callback) {
   setImmediate(callback);
 };
 
-PizzaShop.prototype.getAPIMethods = function() {
+PizzaShop.prototype.getAPIMethods = function () {
   return [];
 };
 
-PizzaShop.prototype.getPublishEvents = function() {
+PizzaShop.prototype.getPublishEvents = function () {
   return [];
 };
 
+// 1 address per product.
+function getAllProducts() {
+  return Product.find()
+    .exec()
+    .then(ps => {
+      return Promise.resolve(ps.map(p => p.toObject()))
+    })
+    .catch(e => {
+      return Promise.reject(e)
+    })
+}
+// TODO pagination options
 
-PizzaShop.prototype.setupRoutes = function(app, express) {
+PizzaShop.prototype.setupRoutes = function (app, express) {
   var self = this;
 
-  app.use(bodyParser.urlencoded({extended: true}));
+  app.use(bodyParser.urlencoded({ extended: true }));
 
   // Serve 'static' dir at localhost:8001
   app.use('/', express.static(__dirname + '/static'));
 
-  // *** Invoice Server model ***
-  // To generate an invoice,
-  // POST localhost:8001/invoice {productID: String}
-  // (DB starts at addressIndex `1`)
+  // (Shop Owner Auth)
+  var verifyKey = function (req, res, next) {
+    if (req.body.key !== SERVER_SECRET) return res.send(401);
+    next();
+  };
+
   // TODO Rate limit per ip
-  // TODO deliveryEmail (optional)
+  app.get('/products', function (req, res, next) {
+    self.log.info('GET /products: ', req.body);
 
-  // TODO represent as state machine on both client and srv - AWAITING_PAYMENT -> FULL_AMOUNT_RECEIVED / TIMED_OUT / PARTIAL_AMOUNT_RECEIVED
-
-  // /get_wallet_address path
-  app.get('/get_wallet_address', function (req, res) {
-// Check we have all we need to proceed
-/*
-    TODO: Revise this
-    if (!req.query.merchantid || req.query.merchantid < 0 ||
-      !req.query.walletid || req.query.walletid < 0 ||
-      !req.query.derivedxpub) {
-      res.send(outputError('Sorry, not all arguments expected were received'));
-    }
-*/
-    // Check we have correct API key
-    if (req.query.apikey != config.apiKey) {
-      console.log("\x1b[31mGetting wallet address - API key not provided or incorect: "+req.query.apikey+"\x1b[0m");
-      res.send(
-        '{\n'+
-        '  "status"        : "error",\n'+
-        '  "statusMessage" : "no API key provided or incorrect"\n'+
-        '}'
-      )
-    } else {
-      // Execute our file with 'browser' process scope argument
-       // TODO: regex on derivedxpub to only allow alphanums
-       // +("undefined" != typeof req.query.derivedxpub ? req.query.derivedxpub.replace(/^[a-z0-9]+$/i,'') : '')
-      var cp = exec('node ~/btcp-explorer/node_modules/store-demo/get_wallet_address.js -browser '
-       +parseInt(req.query.merchantid,10)+" "
-       +parseInt(req.query.walletid,10)+" "
-       +req.query.derivedxpub
-       ,function callback(error, stdout, stderr){
-        // If error, console log it, return error JSON
-        if (error) {
-          console.log(error)
-          res.send(
-            '{\n'+
-            '  "status"        : "error",\n'+
-            '  "statusMessage" : "callback error when getting wallet address: '+error+'"\n'+
-            '}'
-          )
-        // If strerr, console log it, return error JSON
-        } else if (stderr != "") {
-          console.log(stderr)
-          res.send(
-            '{\n'+
-            '  "status"        : "error",\n'+
-            '  "statusMessage" : "stderr when getting wallet address: '+stderr+'"\n'+
-            '}'
-          )
-        // If successful stdout, return JSON (need to chop off any string to the left
-        // of array which seems to be output by bitcore lib
-        } else {
-          res.setHeader('Content-Type', 'application/json');
-          res.send(stdout.substr(stdout.indexOf("{")))
-        }
-        // Kill the child process
-        cp.kill('SIGINT')
-      });
-    }
+    getAllProducts()
+      .then(ps => {
+        return res.status(200).send(ps)
+      })
+      .catch(e => {
+        self.log.error(e);
+        return res.status(500).send({ error: e.message })
+      })
   })
 
-  // /complete_transaction path-- TODO!
-/*
-  app.get('/complete_transaction', function (req, res) {
-    // Check we have correct API key
-    if (req.query.apikey != config.apiKey) {
-      console.log("\x1b[31mCompleting transaction - API key not provided or incorect: "+req.query.apikey+"\x1b[0m");
-      res.send(
-        '{\n'+
-        '  "status"        : "error",\n'+
-        '  "statusMessage" : "no API key provided or incorrect"\n'+
-        '}'
-      )
-    } else {
-      // Execute our file with 'browser' process scope argument
-      var cp = exec('node ~/btcp-explorer/node_modules/store-demo/complete_transaction.js -browser', function callback(error, stdout, stderr){
-        // If error, console log it, return error JSON
-        if (error) {
-          console.log(error)
-          res.send(
-            '{\n'+
-            '  "status"        : "error",\n'+
-            '  "statusMessage" : "callback error when completing transaction: '+error+'"\n'+
-            '}'
-          )
-        // If strerr, console log it, return error JSON
-        } else if (stderr != "") {
-          console.log(stderr)
-          res.send(
-            '{\n'+
-            '  "status"        : "error",\n'+
-            '  "statusMessage" : "stderr when getting completing transaction: '+stderr+'"\n'+
-            '}'
-          )
-        // If successful stdout, return JSON (need to chop off any string to the left
-        // of array which seems to be output by bitcore lib
-        } else {
-          res.setHeader('Content-Type', 'application/json');
-          res.send(stdout.substr(stdout.indexOf("{")))
-        }
-        // Kill the child process
-        cp.kill('SIGINT')
-      });
+
+  // TODO Separate - 'mongo_init.js' from 'generate_hd_wallet.js'
+  // TODO Allow 'xpub' as arg to 'setup_mongo_merchant.js' using commander
+
+  // INPUTS - {price_satoshis: 1, name: 'x', key: 'server_secret'}
+  app.post('/products', verifyKey, function (req, res, next) {
+    self.log.info('POST /products: ', req.body);
+
+    if (!req.body.price_satoshis || !req.body.name) {
+      return res.status(400).send('Fields `price_satoshis` and `name` are required.');
     }
-  })
-*/
 
-  /*
-  app.post('/invoice', function(req, res, next) {
-    self.log.info('POST /invoice: ', req.body);
-    let productID = req.body._id || req.body.productID;
-    var addressIndex;
+    // Generate next address & create a Product 
+    // (DB starts at next_address_index `0`, and post-increments)
+    Merchant.findOneAndUpdate({}, { $inc: { next_address_index: 1 } }, { returnOriginal: false })
+      .select('next_address_index')
+      .exec()
+      .then(m => {
+        if (!m || m.xpub == null) {
+          return res.status(500).send({ error: 'Merchant doesn\'t exist (and/or no xpub has been set)!!! Run `node generate_hd_wallet` offline.' });
+        }
 
-    // Generate (next) fresh address & present invoice
-    Merchant.findOneAndUpdate({}, {$inc: {address_index: 1}})
-    .exec()
-    .then(m => {
-      addressIndex = m.address_index;
-      return Product.findById(productID).exec();
-    })
-    .then(p => {
-      if (!p) {
-        return mongoose.Promise.reject('No products in DB!');
-      }
-      return Invoice.create({address_index: addressIndex, product_id: p._id, total_satoshis: p.price_satoshis});
-    })
-    .then(i => {
-      // Content-Type: text/html
-      return res.status(200).send(self.buildInvoiceHTML(i.address_index, i.total_satoshis));
-    })
-    .catch(e => {
-      self.log.error(e);
-      return res.status(500).send({error: 'Failed to find Merchant/create Invoice in Mongo'});
-    });
+        // Derive next addr from derived xpub
+        let a = bitcore.HDPublicKey(xpub).deriveChild("m/0/" + m.next_address_index).publicKey.toAddress();
+
+        let pJSON = {
+          name: req.body.name,
+          price_satoshis: req.body.price_satoshis,
+          address_btcp: a.toString(),
+          address_index: m.next_address_index
+        };
+
+        return Product.create(pJSON);
+      })
+      .then(p => {
+        return res.status(200).send(p.toObject());
+      })
+      .catch(e => {
+        self.log.error(e);
+        return res.status(500).send({ error: e.message });
+      });
   });
-  */
 
 };
 
-PizzaShop.prototype.getRoutePrefix = function() {
+PizzaShop.prototype.getRoutePrefix = function () {
   return 'store-demo';
 };
 
-PizzaShop.prototype.buildInvoiceHTML = function(addressIndex, totalSatoshis) {
-  let price = totalSatoshis / 1e8; // (100,000,000 sats == 1 BTCP)
 
-  // Address for this invoice
-  // Here, "/0/" == External addrs, "/1/" == Internal (change) addrs
-  //TODO - use correct lib+method - bitcore-lib and deriveChild
-  //let b_new = require('bitcore-lib');
-  //let k = b_new.HDPublicKey(this.xpub);
-  //let address = k.deriveChild("/0/" + addressIndex).publicKey.toAddress();
-  let k = bitcore.HDPublicKey(this.xpub);
-  let address = k.derive("m/0/" + addressIndex).publicKey.toAddress();
-
-  // Hash, aka the H of P2PKH or P2SH
-  let hash = address.hashBuffer.toString('hex');
-
-  this.log.info('New invoice, with generated address:', address);
-
-  var transformed = this.invoiceHtml
-    .replace(/{{price}}/g, price)
-    .replace(/{{address}}/g, address)
-    .replace(/{{hash}}/g, hash)
-    .replace(/{{baseUrl}}/g, '/' + this.getRoutePrefix() + '/');
-  return transformed;
-};
+// TODO Admin panel - my xpub, my products, txs
+// TODO require distinct Product names (mongoose 'unique: true')
+// TODO watching z addrs - use viewing key - 'zkY4fCSnTUC7fWiPSduJC2kXGMMcRgDsiAv8C7mdWYnLUxRWVh1ocq4XuGzZSDQAu7mqzJGbFPcEeupnWUL2NUv615J38om'
+// TODO optionally handle a deliveryEmail (possible over z memo)
 
 module.exports = PizzaShop;
