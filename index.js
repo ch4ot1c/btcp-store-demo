@@ -2,7 +2,7 @@
 
 var EventEmitter = require('events').EventEmitter;
 const fs = require('fs');
-const bitcore = require('bitcore-lib');
+const bitcore = require('bitcore-lib-btcp');
 const bodyParser = require('body-parser');
 
 const mongoose = require('mongoose');
@@ -26,7 +26,7 @@ const hostURL = 'ws://localhost:8001';
 // EXAMPLE - `localhost:8001/store-demo/index.html`
 
 let xpub
-let addresses = []
+let products = []
 
 function PizzaShop(options) {
   EventEmitter.call(this);
@@ -41,26 +41,29 @@ function PizzaShop(options) {
   // ** Watch for Bitcore Events **
 
   //TODO check that other necessary services are started first
+  //TODO more events - 'ready', 'syncd', 'error'
   this.node.services.bitcoind.on('tip', function (h) {
     self.log.info('Event - tip: ', h);
 
+    // TODO make sure incr'd one; if not, account.
     BlockManager.findOneAndUpdate({}, { known_tip_height: h }, { new: true })
       .exec()
       .then(m => {
         if (!m) {
           return Promise.reject('BlockManager doesn\'t exist!!! Run `node init_mongo` offline.');
         } else {
+          // Broadcast saved Block Height
+          self.node.services.web.io.emit('BLOCK_SEEN', { height: m.known_tip_height });
           //let maxHeight = self.node.services.bitcoind.height;
-          //self.log.info('Height: ' + maxHeight);
-          //self.log.info(m.known_tip_height);
-          // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
+
           return Transaction.find({ block_mined: { $gte: m.known_tip_height - NUM_CONFIRMATIONS } }).exec()
         }
       })
       .then(ts => {
         ts.forEach(t => {
+          // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
           self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
-          //TODO 'required_confirms: n-blocks' in Transaction model? Set?
+          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
           //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id?
         })
       })
@@ -68,60 +71,27 @@ function PizzaShop(options) {
         self.log.error(e);
       })
   });
-
-  this.node.services.bitcoind.on('hashblock', function (blockHashHex) {
-    self.log.info('hashblock');
-    self.log.info(blockHashHex);
-
-    // Increment block height for this currency
-    //TODO hmm only need to do this once, on tip?
-    BlockManager.findOneAndUpdate({}, { $inc: { known_tip_height: 1 } }, { new: false })
-      .exec()
-      .then(b => {
-        if (!b) { self.log.error('No BlockManager in Mongo!'); return; }
-        // Broadcast block
-        self.node.services.web.io.emit('BLOCK_SEEN', { height: b.known_tip_height, hash: blockHashHex });
-        // Update + Broadcast Transactions that are now fully confirmed
-        // TODO
-        // (unsubscribe from sender addresses that have no other txs pending)
-      });
-  });
-
-  /*
-  this.node.services.bitcoind.on('bitcoind/addresstxid', function(data) {
-    console.info('bitcoind/addresstxid');
-    console.log(data);
-    // Get and confirm address
-    let bitcoreAddress = bitcore.Address(data.address); //TODO z addrs
-    let a = bitcoreAddress.toString();
-    if (addresses.indexOf(a)<0) { // redundant?
-        console.log(a);
-        console.log(data.txid);
-        //Transaction.create? Already did in rawtransaction, so no
-     }
-  });*/
-
-  this.node.services.bitcoind.on('rawtx', function (transactionHex) {
-    self.log.info('rawtx');
-    self.log.info(transactionHex);
+ 
+  this.node.services.bitcoind.on('tx', function (transactionHex) {
+    self.log.info('Event - tx');
+    //self.log.info(transactionHex);
     // Get outputs
     let t = bitcore.Transaction(transactionHex);
     //console.log(t);
     let o = t.outputs;
-    //console.info(o);
+    //console.log(o);
 
     let p;
-    // Find our address in that tx block
     for (var i = 0; i < o.length; i++) {
+      // Find our address in that output 
       let a = bitcore.Address.fromScript(bitcore.Script.fromBuffer(o[i]._scriptBuffer)).toString();
-      // Handle only txs corresponding to some product's address
-      if (addresses.indexOf(a) < 0) {
-        let product = products.filter(x => { return x.address === a; })[0];
-        if (!product) { continue; }
-        else {
-          p = product;
-          break;
-        }
+      // Handle only txs corresponding to products' addresses
+      self.log.info(a)
+      //self.log.info(self.products)
+      let product = self.products.filter(x => { return x.address_btcp === a })[0];
+      if (product) { 
+        p = product;
+        break;
       }
     }
 
@@ -139,7 +109,8 @@ function PizzaShop(options) {
       self.log.error('You have paid ' + (difference / 100000000).toFixed(8) + ' BTCP too little.\n\nYour transaction will not be processed, but should be saved in the merchant\'s database.');
       self.log.error('Payment Issue! - TODO ELEGANT HANDLING');
 
-      socket.emit('PAID_NOT_ENOUGH_' + productID, { transaction: t });
+      self.log.info(t)
+      socket.emit('PAID_NOT_ENOUGH_' + p._id, { transaction: t });
 
       return;
 
@@ -148,14 +119,20 @@ function PizzaShop(options) {
       // Set amount overpaid and alert user
       let difference = o[i].satoshis - p.price_satoshis;
       self.log.error('You have paid ' + (difference / 100000000).toFixed(8) + ' BTCP too much.\n\nPlease contact merchant to discuss any partial refund.');
-      self.log.warning('Payment Issue! - TODO ELEGANT HANDLING');
+      self.log.warn('Payment Issue! - TODO ELEGANT HANDLING');
       //TODO - For now, their overpayment is accepted as a donation
 
-      awaitConfirmations(self.node.services.web.io, p.id, p.address_btcp, t.txid);
+      
+      self.log.info(JSON.stringify(t.inputs))
+      let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
 
       // Paid exact amount
     } else {
-      awaitConfirmations(self.node.services.web.io, p.id, p.address_btcp, t.txid);
+      self.log.info(t.inputs)
+      //TODO multiple input addrs
+      let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
     }
   });
 
@@ -178,7 +155,7 @@ function PizzaShop(options) {
           }
         })
         .then(() => {
-          return getAllProducts().then(ps => { self.addresses = ps.map(p => p.btcp_address); }).catch(e => { self.log.error(e) })
+          return getAllProducts().then(ps => { self.products = ps }).catch(e => { self.log.error(e) })
         })
         .catch(e => {
           self.log.error(e);
@@ -188,19 +165,21 @@ function PizzaShop(options) {
   // TODO elegantly disconnect mongoose, socket.io
 }
 
-function awaitConfirmations(socket, productID, address, blockchainTxID) {
+function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID) {
   let tJSON = {
-    product_id: productID,
-    user_address: address,
-    satoshis: o[i].satoshis,
+    product_id: product._id,
+    user_address: whoPaid,
+    receiving_address: product.address_btcp,
+    satoshis: amountPaid, 
     blockchain_tx_id: blockchainTxID
   }
   Transaction.create(tJSON)
     .then(t => {
-      socket.emit('PAID_ENOUGH_' + productID, { transaction: t });
+      log.info(t);
+      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t });
     })
     .catch(e => {
-      console.error(e.message);
+      log.error(e);
     });
 }
 

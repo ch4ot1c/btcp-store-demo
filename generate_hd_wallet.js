@@ -54,7 +54,7 @@ BlockManager.findOne({})
     // Update/Replace?
     if (m.xpub == null) {
       m.xpub = derivedXpubkey;
-      reportWalletInfo();
+      //reportWalletInfo();
       return m.save();
     } else { // Don't touch existing xpub
       //console.log(m.xpub);
@@ -78,6 +78,7 @@ BlockManager.findOne({})
   console.log(`\n${ps}`);
 
   reportComplete();
+  reportWalletInfo();
 })
 .catch(e => {
   console.error(e);
