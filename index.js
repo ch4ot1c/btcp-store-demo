@@ -22,7 +22,7 @@ const NUM_CONFIRMATIONS = 6;
 const DEFAULT_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 const hostURL = 'ws://localhost:8001';
 
-// This module will be installed as a service of Bitcore, which will be running on localhost:8001.
+// This module will be installed as a service of Bitcore (bitcore-node), which will be running on localhost:8001.
 // EXAMPLE - `localhost:8001/store-demo/index.html`
 
 let xpub
@@ -61,10 +61,20 @@ function PizzaShop(options) {
       })
       .then(ts => {
         ts.forEach(t => {
-          // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
+          // Confirm + broadcast all unconfirmed Txs that now have n confirmations
           self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
-          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
-          //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id?
+          
+          // TODO explorer link
+          let content = `Your purchase was mined on block: ${t.block_mined}; Final (${NUM_CONFIRMATIONS}th) confirmation seen at block height: ${h}. Transaction ID: ${t.blockchain_tx_id}.`
+          // TODO foreach ASYNC
+          sendGrid.sendMail({
+            toEmail: toEmail, //lookup by in-addrs; must be set+saved before tx broadcasted, within 1h. 'There is already an email set for this address. To change it, you have to pay a nominal fee.'
+            subject: "Shop - Your Confirmation",
+            content: content,
+            contentType: 'text/html'
+          }).then(res => { self.log.info(res)}).catch(e => {self.log.info(e.message)})
+          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save? <YES, TODO
+          //TODO emit at 'FINAL_CONFIRM_SEEN_' + t.blockchain_tx_id?
         })
       })
       .catch(e => {
@@ -122,7 +132,6 @@ function PizzaShop(options) {
       self.log.warn('Payment Issue! - TODO ELEGANT HANDLING');
       //TODO - For now, their overpayment is accepted as a donation
 
-      
       self.log.info(JSON.stringify(t.inputs))
       let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
       saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);

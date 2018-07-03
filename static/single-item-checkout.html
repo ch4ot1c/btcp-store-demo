@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<!-- FRESH addr per song? or per song + per album? -->
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/css/bootstrap.min.css" integrity="sha384-PsH8R72JQ3SOdhVi3uxftmaW6Vc51MKb0q5P2rRUpPvrszuE4W1povHYgTpBfshb"
+        crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mdbootstrap/4.4.1/css/mdb.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="custom/custom.css">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mustache.js/2.3.0/mustache.min.js"></script>
+
+    <!--<script id="template" type="x-tmpl-mustache"></script>-->
+</head>
+
+<!-- TODO v2 - stateful cart - build 'items list' -> total price -> invoice -->
+<!-- TODO Album art -->
+
+<body>
+
+    <!-- Button triggers modal -->
+    <button type="button" class="btn btn-primary btn-lg" data-toggle="modal" data-target="#modal1" onclick="prepareModal()">
+        Buy File
+    </button>
+
+    <!-- Modal 1 -->
+    <!-- 'yourInfoTitle'? -->
+    <div class="modal fade" id="modal1" tabindex="-1" role="dialog" aria-labelledby="presentItemTitle" aria-hidden="true">
+        <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-body" id="prompt_info">
+                        <h2 id="presentItemTitle">
+                            <b class="fileName">{{fileName}}</b>
+                        </h2>
+
+                    <script>
+                        var selectedCrypto = "";
+
+                        function handleUserInfoUpdate() {
+                            /* Effective min addr length */
+                            /* Also require TOS to be checked */
+                            let ok = $("#userCryptoAddressInput").val().length >= 20 && $("#userEmailAddressInput").val().indexOf("@") != -1
+                            $("#goModal2").attr("disabled", !ok)
+                        }
+
+                        function emitSenderInfo() {
+                            socket.emit('SENDER_INFO', { emailAddress: $("#userEmailAddressInput").val(), cryptoAddress: $("#userCryptoAddressInput").val(), cryptoSymbol: selectedCrypto })
+                        }
+                    </script>
+
+                    <br/>
+
+                    <label for="userEmailAddressInput" class="selectedCrypto">Your email address:</label>
+                    <input type="text" id="userEmailAddressInput" placeholder="" onkeyup="handleUserInfoUpdate()" onblur="handleUserInfoUpdate()"
+                        style="background-repeat: repeat; background-image: none; background-position: 0% 0%;">
+
+                    <br/>
+                    <br/>
+
+					<label for="userCryptoAddressInput">Your public <span class="cryptoName">{{cryptoName}}</span> (<span class="cryptoSymbol">{{cryptoSymbol}}</span>) address (any one that will be an 'input' you're paying from):</label>
+                    <input type="text" id="userCryptoAddressInput" placeholder="" onkeyup="handleUserInfoUpdate()" onblur="handleUserInfoUpdate()"
+                        style="background-repeat: repeat; background-image: none; background-position: 0% 0%;">
+                    <br/>
+                    <br/>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default btn-prev">Prev</button>
+                    <button type="button" class="btn btn-default btn-next" id="goModal2" onclick="handleUserInfoUpdate(); emitUpdate();">Next</button>
+                    <!-- ^ DISABLED, Enable box only when validated addr -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modal2" tabindex="-1" role="dialog" aria-labelledby="presentItemTitle" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-body" id="prompt_info">
+                    <h2 id="presentItemTitle">
+                        <b class="storeName">{{storeName}}</b>
+                    </h2>
+
+                    <table class="table table-sm">
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <strong>File Name</strong>
+                                </td>
+                                <td>{{fileName}}</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <strong>File Type</strong>
+                                </td>
+                                <td>{{fileType}}</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <strong>File Size</strong>
+                                </td>
+                                <td>{{fileSize}}</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <strong>SHA256 Checksum</strong>
+                                </td>
+                                <td>{{sha256}}</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <strong>Price in US Dollars</strong>
+                                </td>
+                                <td>${{usdValue}}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <br/>
+
+                    <div class="container">
+                        <h2>Payment Method</h2>
+                        <h3 style="display:inline-block;">
+                            <b>Cryptocurrency</b>
+                        </h3>
+                        <a href="#">
+                            <i class="fa fa-question-circle-o" style="font-size:1.5rem;" aria-hidden="true"></i>
+                        </a>
+                        <div>
+                            <h5>Goes directly to
+                                <span id="cryptoRecipient">{{name}}</span>
+                            </h5>
+                        </div>
+
+                        <div id="cryptoInfo" style="display:none;">
+                            <p>Cryptocurrencies are a new way to pay online without any middleman other than the network itself.
+                                They work very much like traditional money, and can easily be sent as microtransactions.</p>
+                            <p><b>Finally!</b> Artists can be paid directly for their music, from anywhere.</p>
+
+                            <caption>
+                                <h6>Buying your first cryptocurrency?</h6>
+                                <p>1. Buy some Bitcoin (or Ethereum) from
+                                    <a href="https://www.coinbase.com/join/594ddc7b1d697a012730afd9" target="_blank">Coinbase.com</a>.</p>
+                                <p>2. Watch the video to learn how to buy cryptocurrencies</p>.
+                            </caption>
+                            <embed src="https://www.youtube.com/watch?v=fJKNY9LMlpY" />
+
+                            <!--
+							TODO add more reading resources
+							<p>To buy any of the listed cryptocurrencies, visit <a href="https://binance.com" target="_blank">Bittrex.com</a>.</p>
+							<p>(Most coins are traded in units of .00000001, or one hundred millionth. In Crypto, this is called a Satoshi.)</p>
+							-->
+                        </div>
+
+                        <div class="row">
+                            <div class="col-6 text-center">
+                                <button type="button" disabled="" class="btn btn-primary btn-large btc" style="padding:8px; width:inherit;">
+                                    <img style="width:inherit;" src="http://files.coinmarketcap.com.s3-website-us-east-1.amazonaws.com/static/img/coins/200x200/bitcoin.png"
+                                        class="rounded-circle" />
+                                    <br/>
+                                    <br/>
+                                    <h4>
+                                        <b>Bitcoin</b>
+                                    </h4>
+                                    <p><span id="btc-rate"></span> BTC</p>
+                                </button>
+                                <br/>
+                                <br/>
+                                <!--<canvas id="allocations_bitcoin"></canvas>-->
+                                <!--<i>.0002260-.0003390 BTC Network Fee</i>-->
+                                <!-- BTC BYTES: in(1) * 146 + out(2) * 33 + 10 , 146+66+10 >= 222 bytes (Your Sending Address -> Output Address + Your Change Address) -->
+                                <!-- Batching purchases into single payments is recommended! Also, Lightning coming soon -->
+                            </div>
+                            <div class="col-6 text-center">
+                                <button type="button" class="btn btn-primary btn-large vtc" style="padding:8px; width:inherit;">
+                                    <img style="width:inherit;" src="https://s2.coinmarketcap.com/static/img/coins/200x200/2575.png" class="rounded-circle" />
+                                    <br/>
+                                    <br/>
+                                    <h4>
+                                        <b>Bitcoin Private</b>
+                                    </h4>
+                                    <p><span id="btcp-rate"></span> BTCP</p>
+                                </button>
+                                <br/>
+                                <br/>
+                                <!--<canvas id="allocations_bitcoinprivate"></canvas>-->
+                                <!--<i>.0003000-.0030000 BTCP Network Fee</i>-->
+                            </div>
+                        </div>
+
+                        <!-- TODO Paypal
+                        <div class="row">
+                            <div class="col-12">
+                                <h3>
+                                    <b>PayPal</b>
+                                </h3>
+                                <script id="paypalSurchargeLabel" type="text/template">
+									<h5>Middleman, <b>${{surcharge}} surcharge</b></h5>
+								</script>
+                                <div class="paypalSurcharge"></div>
+
+                                <table border="0" cellpadding="0" cellspacing="0" align="center" style="margin:0px;">
+                                    <tr>
+                                        <td align="center">
+                                            <a href="https://www.paypal.com/webapps/mpp/paypal-popup" title="How PayPal Works" onclick="javascript:window.open('https://www.paypal.com/webapps/mpp/paypal-popup','WIPaypal','toolbar=no, location=no, directories=no, status=no, menubar=no, scrollbars=yes, resizable=yes, width=1060, height=700'); return false;">
+                                                <img src="https://www.paypalobjects.com/webstatic/mktg/logo/AM_mc_vs_dc_ae.jpg" border="0" alt="PayPal Acceptance Mark">
+                                            </a>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div> -->
+                    </div>
+
+                    <div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default btn-prev">Prev</button>
+                            <button type="button" class="btn btn-default btn-next" id="goModal3" onclick="handleUserInfoUpdate(); emitUpdate();">Next</button>
+                            <!-- ^ DISABLED, Enable box only when validated addr -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button type="button" class="btn btn-primary btn-lg" data-toggle="modal" data-target="#modal3">
+        Make Payment
+    </button>
+
+    <div class="modal fade" id="modal3" tabindex="-1" role="dialog" aria-labelledby="makePaymentTitle" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 class="modal-title" id="makePaymentTitle">Make Payment</h4>
+                </div>
+                <div class="modal-body text-center">
+                    <div id="sendPrompt">
+                        <h3>Send <span class="cryptoValue"></span> <span class="cryptoSymbol"></span> to</h3>
+                        <h3><b><span class="cryptoSongAddress"></span></b></h3>
+                        <p style="margin-bottom:0px;">Your download will be presented once confirmed. The link only lasts 30 minutes (generated once the {{NUM_CONFIRMATIONS}}th confirmation is mined), so be sure to claim your file.</p>
+                    </div>
+
+                    <div class="sendCrypto"></div>
+
+                    <img class="cryptoSongQRLink" src="https://placehold.it/200x200" target="_blank" />
+                    <br/>
+
+                    <!--<p>Your transaction will be visible on the <a href="https://explorer.btcprivate.org/address/{{addresses[selectedCrypto]}}" target="_blank">BTCP Block Explorer</a>-->
+
+                    <div id="tipsMessage"><p>Tips are always appreciated!</p></div>
+                    <!-- TODO - tiered rewards -  If you send more than the song price, <b>{{song.artistName}}</b> will also send you a special thank you letter. -->
+                    <div class="tipsText"></div>
+
+                    <div class="tipsText">On the final confirmation of your tx, you will be emailed a link with your download. It lasts 30 minutes before expiring. You may now close this window if you like; check your email for the delivery.</div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default btn-prev">Prev</button>
+                    <button type="button" disabled="" class="btn btn-default btn-next">
+                        Waiting for Payment &nbsp;&nbsp;
+                        <i class="fa fa-circle-o-notch fa-spin" style="font-size:18px"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Button trigger modal -->
+    <button type="button" class="btn btn-primary btn-lg" data-toggle="modal" data-target="#modal4">
+        Present Download
+    </button>
+
+    <!-- Modal -->
+    <div class="modal fade" id="modal4" tabindex="-1" role="dialog" aria-labelledby="presentDownloadTitle" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 class="modal-title" id="presentDownloadTitle">Download</h4>
+                </div>
+                <div class="modal-body">
+                    <p>Song Info, again</p>
+                    <p>Download TempLink + JWT</p>
+                    <h2>That's all! </h2>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="mustache_target" type="x-tmpl-mustache">
+        <br/>
+
+        <!--
+              /* Discussion of threats to musicians around STREAMING ACCOUNT SHARING vs FILE SHARING */
+              /* Sending cryptocurrency is the most direct way for artists to get paid on the internet. The network itself is the only source of transaction fees; this is different from other approaches where one or several companies take a cut for themselves.
+
+							show them vert,btcp,zcl
+							show that artist will be paid more thru cheaper tx fee cryptos, proportionally speaking
+
+							show that user will pay more in total for using Fiat (show 3%+30c markup rule)
+							-->
+
+        <div class="block-estimator">
+            <h3>How long are you willing to wait for your download?</h3>
+            <p>Be processed on the {{ordinal}} block</p>
+            <div class="container">
+                <!--
+                  <script>
+                  function updateBlockEstimate() {
+                    //Update final output txt to final val
+
+                  }
+                  </script>
+                  -->
+                <input id="block-estimator-slider" type="range" min="1" max="10" onmouseup="updateBlockEstimate()" />
+                <script>
+                  /* mintxfee, 0.001 (LTC) */
+                  /* mintxfee, 0.000000001 = 1sat (BTC) */
+                  /* given current mempool density stats in sat/B, which block will you be in given you pay x sats == approx how long til first conf */
+                  /* when was the last transaction with a transaction fee of x added to a block for processing? SO what was the lowest transaction fee of in last block? stats on tx fees of prior k blocks */
+                  /* Pay with Cryptocurrency | Pay with Fiat */
+                  /* Pay {{artistName}} directly (VTC, LTC, BTC, ETH, others they config+accept) | Pay {{artistName}} through CoinPayments (Any) */
+                </script>
+            </div>
+        </div>
+
+        <div class="text-center">
+            <b>The artist must receive over 2/3 of ${{usdValue}}.</b>
+            <br/>
+            <!--<i>If you're patient, you can help receive even more.</i> &nbsp;<a href="#">Info</a>-->
+        </div>
+
+        <br/>
+        <br/>
+
+        <h2>Pay {{artistName}} through a middleman:</h2>
+
+        <!-- Ceil to 4th decimal -->
+        <div class="row">
+            <div class="col-12">
+                <p>
+                    <!-- TODO - artist.coinpayments_url -->
+                    <button type="submit" onclick="location.href='https://coinpayments.net/'">Other Cryptocurrency (via CoinPayments.net)</button>
+                    <br/>
+                    <p>Pay 1.005 x (${{usdValue}} + Network Fee)
+                        <b>&gt; $1.005</b>
+                    </p>
+                    <!--<canvas id="allocations_other"></canvas>-->
+                    <b>Artist receives ${{usdValue}}.</b>
+                </p>
+                <br/>
+                <p>
+                    <button type="submit">Paypal / Stripe</button>
+                    <br/>
+                    <p>Pay 1.029 x ${{usdValue}} + $0.30
+                        <b> = $1.329</b>
+                    </p>
+                    <canvas id="allocations_paypalstripe"></canvas>
+                    <b>Artist receives ${{usdValue}}.</b>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <br/>
+    <br/>
+
+
+    </fieldset>
+    </form>
+    </div>
+
+    <div class="col-md-12 col-lg-2">
+    </div>
+    </div>
+    </div>
+
+    <br/>
+    <br/>
+
+    <div class="container" id="prompt_send">
+        <div class="text-center">
+            <br/>
+
+            <!-- Think of sending Bitcoin like sending Gold around the internet. It needs to be very carefully verified for authenticity as it arrives at its destination, due to its high value. These are the 'confirmations' that Bitcoin Miners perform in order to process your transaction; these verifiers are rewarded in part by your transaction fee. This ecosystem of decentralized banking is known as the Bitcoin Network. -->
+
+            <h4>Your wallet should automatically determine a reasonable network fee and add it to the total of your transaction.
+                If not, here are some suggestions:</h4>
+            <p>
+                Fast (within Xmin): .01USD
+                <br/> Slow (within Ymin): .001USD
+            </p>
+
+            <!--
+			<p>
+			Fast (within Xmin): .08USD<br/>
+      Slow (within Ymin): .01USD
+			</p>
+
+      ~333 bytes<br/>
+      @ 100 sats/byte : 20min<br/>
+      @ 150 sats/byte : 4h</p>
+      <p>
+			>= 222 byte transaction
+      Average Block Time: 10 min
+			Fast (within 20min) (150 sat/byte) .00033900 BTC = $1.875, Slow (within 4h) .00022600 BTC @ 100 sat/byte = $1.25
+			</p>
+-->
+
+            <!--<p>Please be patient ~ Bitcoin transactions can take some time!</p>-->
+
+
+        </div>
+
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh"
+        crossorigin="anonymous"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/js/bootstrap.min.js" integrity="sha384-alpBpkh1PFOepccYVYDB4do5UnbKysX5WZXm3XxPqe5iKTfUKjNkCk9SaVuEZflJ"
+        crossorigin="anonymous"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.0/Chart.bundle.min.js"></script>
+
+    <script src="js/modals.js"></script>
+
+    <!--
+  <script>
+    $("#block-estimator-slider").change(function(e, elem) { console.log(blockTime(selectedCrypto, elem.value)) });
+  </script>
+  -->
+<!-- Modal 2 -->
+    <div class="modal fade" id="modal2" tabindex="-1" role="dialog" aria-labelledby="startPaymentTitle" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 class="modal-title" id="startPaymentTitle">Ready Payment</h4>
+                </div>
+                
+        </div>
+    </div>
+    <script>
+
+        // DUMMY DATA
+
+        let file = {
+            name: "test.mp3",
+            addresses: {
+                vtc: "Vgz1vAGKvDT99RxfEgxSmtBstmg8NoGHVS",
+                ltc: "MWAbAVbP9kG7zUenbL7jvwvnfG9FEsie8K",
+                btcp: "bWAbAVbP9kG7zUenbL7jvwvnfG9FEsie8K",
+                btc: "3J7j9ja4QZRY1rwUZiLkaikfh3q7F1d1Gu"
+            },
+            // (The following can be computed)
+            fileSize: "3.2MB",
+            fileType: "MP3",
+            sha256: "c01b39c7a35ccc3b081a3e83d2c71fa9a767ebfeb45c69f08e17dfe3ef375a7b"
+        }
+
+        
+
+        let song = {
+            name: "Lemonade",
+            artistName: "Gucci Mane",
+            dateCreated: "Oct 11, 2017 09:00 UTC",
+            length: "01:22",
+            quality: "320kbps",
+            fileSize: "3.2 MB",
+            fileType: "MP3",
+            usdValue: "1",
+            sha256: "c01b39c7a35ccc3b081a3e83d2c71fa9a767ebfeb45c69f08e17dfe3ef375a7b",
+        }
+
+        let artist = {
+            name: "Gucci Mane",
+            dateCreated: "Oct 10, 2017 08:00 UTC",
+            verified: true
+        }
+
+    </script>
+
+    <script>
+
+        function updateCryptoInfo(selectedCrypto) {
+            $(".cryptoValue").each(function () {
+                let exchangeRate = cryptoRates[selectedCrypto.toUpperCase()];
+                $(this).html(song.usdValue * exchangeRate);
+            });
+
+            $(".cryptoSymbol").each(function () {
+                $(this).html(selectedCrypto.toUpperCase());
+            });
+
+            $(".cryptoName").each(function () {
+                $(this).html(nameForCrypto(selectedCrypto));
+            });
+
+            $(".cryptoSongAddress").each(function () {
+                $(this).html(song.addresses[selectedCrypto]);
+            });
+
+            $(".cryptoSongQRLink").each(function () {
+                let selectedCryptoAddress = song.addresses[selectedCrypto];
+                $(this).attr("src", "https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=".concat(selectedCryptoAddress));
+            });
+        }
+
+        $(".btc").click(function (e) {
+            updateCryptoInfo("btc");
+        });
+        $(".btcp").click(function (e) {
+            updateCryptoInfo("btcp");
+        });
+
+    </script>
+
+
+    <script>
+/*
+        $('.songInfo').html(song);
+
+        $('.fileName').html(file.name);
+
+    //DISRUPTIVE - CHARGE AN ADDITIONAL FEE for using PayPal
+            let surcharge = .029 * song.usdValue + .3;
+        var template = $('#paypalSurchargeLabel').html();
+        var html = Mustache.to_html(template, { surcharge: surcharge });
+        $('.paypalSurcharge').html(html);
+
+        var template = $('#userAddressLabel').html();
+        var html = Mustache.to_html(template, { selectedCrypto: selectedCrypto });
+        $('.userAddress').html(html);
+
+        var template = $('#sendPrompt').html();
+        var html = Mustache.to_html(template, { song: song });
+        $('.sendCrypto').html(html);
+
+        var template = $('#tipsMessage').html();
+        var html = Mustache.to_html(template, { song: song });
+        $('.tipsText').html(html);
+
+        */
+
+    </script>
+
+    <script>
+        function prepareModal() {
+            $("#btc-rate").html((cryptoRates["BTC"] * song.usdValue) + " BTC");
+            $("#btcp-rate").html((cryptoRates["BTCP"] * song.usdValue) + " BTCP");
+            $("#ltc-rate").html((cryptoRates["LTC"] * song.usdValue) + " LTC");
+            $("#vtc-rate").html((cryptoRates["VTC"] * song.usdValue) + " VTC");
+        }
+    </script>
+
+    <script>
+        var cryptoRates = {};
+        $.get("https://api.coinmarketcap.com/v1/ticker/?convert=USD&limit=100", function (data) {
+            cryptoRates = data
+            console.log(cryptoRates);
+        });
+    </script>
+
+    <script>
+        function nameForCrypto(symbol) {
+            switch (symbol) {
+                case "btcp":
+                    return "Bitcoin Private";
+                case "btc":
+                    return "Bitcoin";
+                case "zcl":
+                    return "Zclassic";
+                case "bch":
+                    return "Bitcoin Cash";
+                case "ltc":
+                    return "Litecoin";
+                default:
+                    return "?";
+            }
+        }
+    //TODO ETH (web3)
+    </script>
+
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.4/socket.io.js'></script>
+    <script>
+        var endpoint = 'http://localhost:3001'; // TODO set
+        var socket = io.connect(endpoint);
+
+        socket.on('TXN_CONFIRMED', function (data) {
+            console.log(data); // FORMAT: {txn: txn, jwt: jwt}
+            console.log('http://localhost/download/' + songSHA256 + '?jwt=' + jwt)
+
+            socket.emit('TXN_CONFIRMED_ACK', { ack: 'ack ok' });
+        });
+
+        function emitSenderInfo(a, c) {
+            socket.emit('SENDER_INFO', { address: a, currency: c });
+        }
+    </script>
+
+    <!--
+	<script>
+		var template = $('#mustache_target').html();
+		Mustache.parse(template);   // optional, speeds up future uses
+		var rendered = Mustache.render(template, song);
+		$('#mustache_target').html(rendered);
+	</script>
+  -->
+
+    <!--
+let balance = '127.0.0.1:3001/ext/getbalance/' + songAddress
+let
+-->
+
+</body>
+
+</html>
