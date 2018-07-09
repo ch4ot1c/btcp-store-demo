@@ -26,7 +26,7 @@ const hostURL = 'ws://localhost:8001';
 // EXAMPLE - `localhost:8001/store-demo/index.html`
 
 let xpub
-let products = []
+var products = []
 
 function PizzaShop(options) {
   EventEmitter.call(this);
@@ -88,7 +88,7 @@ function PizzaShop(options) {
       // Handle only txs corresponding to products' addresses
       self.log.info(a)
       //self.log.info(self.products)
-      let product = self.products.filter(x => { return x.address_btcp === a })[0];
+      let product = products.filter(x => { return x.address_btcp === a })[0];
       if (product) { 
         p = product;
         break;
@@ -155,7 +155,7 @@ function PizzaShop(options) {
           }
         })
         .then(() => {
-          return getAllProducts().then(ps => { self.products = ps }).catch(e => { self.log.error(e) })
+          return getAllProducts().then(ps => { products = ps }).catch(e => { self.log.error(e) })
         })
         .catch(e => {
           self.log.error(e);

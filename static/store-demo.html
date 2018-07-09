@@ -4,25 +4,21 @@
   <title>Pizza Shop</title>
   <base href="{{baseUrl}}" />
   <script src="js/socket.io.js"></script>
-  <script src="js/bitcore-lib.js"></script>
+  <script src="js/bitcore-lib/bitcore-lib.js"></script>
 </head>
 
 <body>
-  <!-- TODO topbar red - Don't forget your email address in the memo! Otherwise your item may not be deliverable! -->
   <h1>Pizza Shop</h1>
 <!--
-  <h2>To shop here, you will need to send a special type of transaction.</h2>
+  <h2>Future Feature: To shop here, you will need to send a special type of transaction.</h2>
   <p>Use the <a>BTCP Full Node Desktop Wallet</a> to send a shielded memo containing **your email address**. This will be used to deliver your receipt receipt / digital goods.</p>
+  <p>CAN ALL BE DONE WATCHING 1 Z ADDR PER PRODUCT - index by 'memo' email</p>
+  <p>TODO topbar red - Don't forget your email address in the memo! Otherwise your item may not be deliverable (you can't get a receipt / download link)!</p>
 -->
 <!--
   <button onclick="document.getElementById('reveal').style.display = 'block';">OK</button>
 -->
-<!-- CAN ALL BE DONE WATCHING 1 Z ADDR PER PRODUCT - index by 'memo' email -->
 
-  <div id="reveal" style="display:none;">
-    <b>Don't forget to put your EMAIL in the memo field of your shielded transaction - otherwise you cannot get a receipt / download link!!!</b> 
-  </div>
-  
   <div id="products"></div>
   <!-- TODO UI for a glow (on socket events)-->
 
@@ -33,7 +29,7 @@
 
 var bitcore = require('bitcore-lib')
 
-let hostURL = 'ec2-54-186-92-171.us-west-2.compute.amazonaws.com:8001'
+let hostURL = 'ec2-54-188-12-181.us-west-2.compute.amazonaws.com:8001'
 
 var self = this
 var pendingTransactions = []

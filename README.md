@@ -1,10 +1,19 @@
 # Pizza Shop 
-### store-demo package
+### store-demo package / bitcore service
 
-Bitcore Backend Example for a store (invoice server)
+Bitcore Backend Example for a store.
 
-Set up via [bitcore-install](https://github.com/BTCPrivate/bitcore-install).
+- NodeJS
+- One static address per-product.
+- Uses MongoDB (for both store-demo and bitcore-node-btcp)
 
-MongoDB and NodeJS are dependencies.
+To install: [bitcore-install](https://github.com/BTCPrivate/bitcore-install).
 
-`localhost:8001`
+Final steps:
+- `cd node_modules/store-demo`
+- Copy `node_modules/dist/socket.io-client/socket.io.js` into `static/js`
+- Set hostURL in both the `store-demo.html` and `index.js`
+
+To run: `mongod &` and then `./bitcore-node start`.
+
+To view: `localhost:8001` or `hostname.com:8001/store-demo/store-demo.html`
