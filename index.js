@@ -15,12 +15,12 @@ const Transaction = require('./models').Transaction;
 const Product = require('./models').Product;
 
 //TODO relocate
-const SERVER_SECRET = 'key';
+const SERVER_SECRET = 'SET_ME';
 
 const NUM_CONFIRMATIONS = 6;
 
 const DEFAULT_MONGO_URL = 'mongodb://localhost:27017/store-demo';
-const hostURL = 'ws://localhost:8001';
+//const hostURL = 'ws://localhost:8001';
 
 // This module will be installed as a service of Bitcore, which will be running on localhost:8001.
 // EXAMPLE - `localhost:8001/store-demo/index.html`
@@ -41,7 +41,7 @@ function PizzaShop(options) {
   // ** Watch for Bitcore Events **
 
   //TODO check that other necessary services are started first
-  //TODO more events - 'ready', 'syncd', 'error'
+  //TODO handle remaining events - 'ready', 'syncd', 'error'
   this.node.services.bitcoind.on('tip', function (h) {
     self.log.info('Event - tip: ', h);
 
@@ -56,15 +56,20 @@ function PizzaShop(options) {
           self.node.services.web.io.emit('BLOCK_SEEN', { height: m.known_tip_height });
           //let maxHeight = self.node.services.bitcoind.height;
 
+          // Confirm all unconfirmed txs that now have n confirmations
+          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
           return Transaction.find({ block_mined: { $gte: m.known_tip_height - NUM_CONFIRMATIONS } }).exec()
         }
       })
       .then(ts => {
-        ts.forEach(t => {
-          // Confirm + broadcast all unconfirmed Txs that now have n confirmations 
+        ts.forEach(t => { //TODO batch
+          const content = `
+          Hey there!<br><br>
+          The following message is your delivered product:<br>Your product_id was ${t.product_id}.<br>
+          `
+          sendMail({ toEmail: email, subject: 'Delivery From MY_SITE_NAME', content }).then(success => { console.log(success); }).catch(e => { console.log(e); })
           self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
-          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
-          //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id?
+          //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
         })
       })
       .catch(e => {
