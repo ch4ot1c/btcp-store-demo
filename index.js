@@ -17,7 +17,7 @@ const Product = require('./models').Product;
 //TODO relocate
 const SERVER_SECRET = 'SET_ME';
 
-const NUM_CONFIRMATIONS = 6;
+const NUM_CONFIRMATIONS = 2;
 
 const DEFAULT_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 //const hostURL = 'ws://localhost:8001';
@@ -91,7 +91,7 @@ function PizzaShop(options) {
       // Find our address in that output 
       let a = bitcore.Address.fromScript(bitcore.Script.fromBuffer(o[i]._scriptBuffer)).toString();
       // Handle only txs corresponding to products' addresses
-      self.log.info(a)
+      //self.log.info(a)
       //self.log.info(self.products)
       let product = products.filter(x => { return x.address_btcp === a })[0];
       if (product) { 

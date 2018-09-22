@@ -5,6 +5,12 @@
   <base href="{{baseUrl}}" />
   <script src="js/socket.io.js"></script>
   <script src="js/bitcore-lib/bitcore-lib.js"></script>
+  <script>
+    var userEmail
+    window.onload = function() {
+      userEmail = prompt("Please enter your email (for delivery)", "me@demo.com")
+    }
+  </script>
 </head>
 
 <body>
@@ -29,7 +35,7 @@
 
 var bitcore = require('bitcore-lib')
 
-let hostURL = 'ec2-54-188-12-181.us-west-2.compute.amazonaws.com:8001'
+let hostURL = 'ec2-54-186-106-89.us-west-2.compute.amazonaws.com:8001'
 
 var self = this
 var pendingTransactions = []
