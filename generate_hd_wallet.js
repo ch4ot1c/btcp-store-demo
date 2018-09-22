@@ -99,11 +99,11 @@ function addressAtIndex(index) {
   return derivedHDPublicKey.deriveChild("m/0/" + index).publicKey.toAddress();
 }
 
-function createDummyProducts() {
+function createDummyProducts() { // Pizza Files
   return Promise.all([
-    Product.create({name: 'pizza_whole', price_satoshis: '800', address_btcp: addressAtIndex(0)}),
-    Product.create({name: 'pizza_half', price_satoshis: '400', address_btcp: addressAtIndex(1)}),
-    Product.create({name: 'pizza_oneslice', price_satoshis: '100', address_btcp: addressAtIndex(2)})
+    Product.create({name: 'pizza_whole', price_satoshis: '800', address_btcp: addressAtIndex(0), file_name: 'whole'}),
+    Product.create({name: 'pizza_half', price_satoshis: '400', address_btcp: addressAtIndex(1), file_name: 'half'}),
+    Product.create({name: 'pizza_oneslice', price_satoshis: '100', address_btcp: addressAtIndex(2), file_name: 'oneslice'})
   ])
 }
 

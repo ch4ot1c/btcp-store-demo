@@ -45,7 +45,7 @@ function PizzaShop(options) {
   this.node.services.bitcoind.on('tip', function (h) {
     self.log.info('Event - tip: ', h);
 
-    // TODO make sure incr'd one; if not, account.
+    // TODO make sure incr'd one; if not, account (reorg? or ffw).
     BlockManager.findOneAndUpdate({}, { known_tip_height: h }, { new: true })
       .exec()
       .then(m => {
@@ -63,11 +63,21 @@ function PizzaShop(options) {
       })
       .then(ts => {
         ts.forEach(t => { //TODO batch
-          const content = `
-          Hey there!<br><br>
-          The following message is your delivered product:<br>Your product_id was ${t.product_id}.<br>
-          `
-          sendMail({ toEmail: email, subject: 'Delivery From MY_SITE_NAME', content }).then(success => { console.log(success); }).catch(e => { console.log(e); })
+          // using SendGrid's Node.js Library
+          // https://github.com/sendgrid/sendgrid-nodejs
+          const SENDGRID_KEY = '' //TODO env var
+          var sendgrid = require('sendgrid')('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');
+          var email = new sendgrid.Email();
+
+          email.addTo(userEmail);
+          email.setFrom("me@jonl.io");
+          email.setSubject("Sending with SendGrid is Fun");
+          let txt = 'This is your initial receipt. blockchain txid: ' + t.blockchain_tx_id + ', sent from address: ' + t.user_address + ', received for product: ' + t.product_id;
+          email.setHtml(txt);
+
+          sendgrid.send(email);
+          //TODO retrieve, deliver a product as a URL
+
           self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
           //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
         })
@@ -130,14 +140,14 @@ function PizzaShop(options) {
       
       self.log.info(JSON.stringify(t.inputs))
       let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
-      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.id);
 
       // Paid exact amount
     } else {
       self.log.info(t.inputs)
       //TODO multiple input addrs
       let ua = bitcore.Address.fromScript(bitcore.Script.fromBuffer(t.inputs[0]._scriptBuffer)).toString();
-      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.blockchain_txid);
+      saveTxAndWait(self.log, self.node.services.web.io, ua, o[i].satoshis, p, t.id);
     }
   });
 
@@ -182,6 +192,28 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
     .then(t => {
       log.info(t);
       socket.emit('PAID_ENOUGH_' + product._id, { transaction: t });
+      // using SendGrid's Node.js Library
+      // https://github.com/sendgrid/sendgrid-nodejs
+      const SENDGRID_KEY = '' //TODO env var
+      var sendgrid = require('sendgrid')('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');
+      var email = new sendgrid.Email();
+
+      email.addTo(userEmail);
+      email.setFrom("me@jonl.io");
+      email.setSubject("Sending with SendGrid is Fun");
+      email.setHtml("This is your initial receipt - blockchain txid: " + blockchainTxID);
+
+      sendgrid.send(email);
+      /*
+      const msg = {
+        to: 'jonlaytonmail@gmail.com',
+        from: 'me@jonl.io',
+        subject: 'Sending with SendGrid is Fun',
+        text: 'and easy to do anywhere, even with Node.js',
+         html: '<strong>and easy to do anywhere, even with Node.js</strong>',
+      };
+      sgMail.send(msg);  
+      */
     })
     .catch(e => {
       log.error(e);
@@ -234,6 +266,85 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
     if (req.body.key !== SERVER_SECRET) return res.send(401);
     next();
   };
+
+  // TODO Rate limit per ip
+  // {userAddress: 'b1xxx', userEmail: 'a@a.com'}
+  app.post('/guestbook', function (req, res, next) {
+    self.log.info('POST /guestbook: ', req.body);
+
+    //TODO validation
+    var userAddress = req.body.userAddress;
+    var userEmail = req.body.userEmail;
+
+    // save to db - if address is present, if new email AND 1 hour hasn't passed, update email for addr
+    // or
+    // they can set a password for this email... TODO
+
+    User.findOne({address_btcp: userAddress})
+    .exec()
+    .then(u => {
+      if (!u) {
+        User.create({address_btcp: userAddress, email: userEmail})
+        .then(x => {
+          return res.sendStatus(201);
+        })
+        .catch(err => {
+          self.log.error(err);
+          return res.sendStatus(500);
+        })
+      } else if (u.address_btcp === userAddress) { //TODO && > 1 hour 
+         // Update
+         u.email = userEmail;
+         u.save().exec().then(x => { return res.sendStatus(204); }).catch(e => { return res.status(500).send({error: e.message}); })
+      } else {
+        return res.sendStatus(500);
+      }
+    })
+    .catch(e => {
+      self.log.error(e);
+      return res.status(500).send({ error: e.message })
+    })
+  })
+
+
+
+  const FILES_FOLDER = './songs';
+
+  // Attempt to Use a Download Link (with jwt as query param)
+  function downloadFile(req, res) {
+    let productID = req.params.productID;
+    let jwt = req.query.jwt;
+
+    // Verify Token + its Expiry
+    if (!jwt.verify(jwt, 'DL_VERIFY_SECRET', { algorithms: ['HS256'] })) {
+      //jwt.decode()
+      //TODO check that its data is SALT + sha (via decode?)
+      return res.status(403).send({ err: 'Access Denied' })
+    }
+
+    console.log('JWT verified for song in product ' + productID + ' - downloading');
+
+    // Find + Serve file
+    //TODO lock public permissions on this folder
+    Product.findById(productID)
+    .exec()
+    .then(p => {
+      let songPath = path.join(FILES_FOLDER, p.file_name)
+      return res.download(songPath, p.file_name, function(err) {
+        if (err) {
+          console.log(err)
+          console.log(res.headersSent)
+          return res.end()
+        }
+        console.log('Started Download.')
+      })
+    })
+    .catch(e => {
+      console.log(e)
+      return res.status(500).send({error: e})
+    })
+  }
+  app.get('/download/:productID', downloadFile);
 
   // TODO Rate limit per ip
   app.get('/products', function (req, res, next) {

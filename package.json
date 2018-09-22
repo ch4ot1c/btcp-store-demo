@@ -1,10 +1,11 @@
 {
   "dependencies": {
+    "sendgrid": "1.9.2",
     "bitcore-lib": "github:ch4ot1c/bitcore-lib",
     "bitcore-lib-btcp": "BTCP-community/bitcore-lib-btcp",
     "bitcore-mnemonic": "github:ch4ot1c/bitcore-mnemonic",
-    "body-parser": "^1.15.1",
     "bluebird": "^3.5.1",
+    "body-parser": "^1.15.1",
     "mongoose": "^5.1.0",
     "socket.io": "^2.1.0",
     "socket.io-client": "^2.1.0"

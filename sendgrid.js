@@ -1,6 +1,7 @@
-import sendgrid, { mail as helper } from 'sendgrid'
+//import sendgrid, { mail as helper } from 'sendgrid'
 //import { sendgridKey, defaultEmail } from 'config'
 
+/*
 const defaultEmail = 'no-reply@mysite.com'
 
 const sendgridKey = 'SET_SG_KEY'
@@ -25,3 +26,4 @@ export const sendMail = ({
 
   return sg.API(request)
 }
+*/
