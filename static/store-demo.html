@@ -5,13 +5,20 @@
   <base href="{{baseUrl}}" />
   <script src="js/socket.io.js"></script>
   <script src="js/bitcore-lib/bitcore-lib.js"></script>
+  <script src="https://code.jquery.com/jquery-1.10.2.js"></script>
   <script>
+    var hostURL = window.location.hostname + ':' + window.location.port
+
     var userEmail
     var userAddress
     window.onload = function() {
       userEmail = prompt("Please enter your email (for delivery)", "me@demo.com")
       //TODO select coin
       userAddress = prompt("Please enter your address (any input one you'll be sending from)", "b1xxx")
+      $.post('http://' + hostURL + '/store-demo/guestbook', {userAddress: userAddress, userEmail: userEmail}, function( data ) {
+        console.log(data)
+	//$( ".result" ).html( data );
+      });
     }
   </script>
 </head>
@@ -38,7 +45,8 @@
 
 var bitcore = require('bitcore-lib')
 
-let hostURL = 'ec2-54-186-106-89.us-west-2.compute.amazonaws.com:8001'
+
+//ec2-54-245-183-37.us-west-2.compute.amazonaws.com:8001
 
 var self = this
 var pendingTransactions = []

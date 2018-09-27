@@ -9,15 +9,22 @@ const mongoose = require('mongoose');
 mongoose.Promise = require('bluebird');
 global.Promise = mongoose.Promise;
 
+const sendgridClient = require('sendgrid')
+
 const Merchant = require('./models').Merchant;
 const BlockManager = require('./models').BlockManager;
 const Transaction = require('./models').Transaction;
 const Product = require('./models').Product;
+const User = require('./models').User;
 
 //TODO relocate
 const SERVER_SECRET = 'SET_ME';
 
 const NUM_CONFIRMATIONS = 2;
+
+const FROM_EMAIL = 'dummy@dummy.com';
+
+const SENDGRID_API_KEY = 'SENDGRID_API_KEY';
 
 const DEFAULT_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 //const hostURL = 'ws://localhost:8001';
@@ -25,7 +32,7 @@ const DEFAULT_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 // This module will be installed as a service of Bitcore, which will be running on localhost:8001.
 // EXAMPLE - `localhost:8001/store-demo/index.html`
 
-let xpub
+let merchantXpub
 var products = []
 
 function PizzaShop(options) {
@@ -62,25 +69,39 @@ function PizzaShop(options) {
         }
       })
       .then(ts => {
-        ts.forEach(t => { //TODO batch
-          // using SendGrid's Node.js Library
-          // https://github.com/sendgrid/sendgrid-nodejs
-          const SENDGRID_KEY = '' //TODO env var
-          var sendgrid = require('sendgrid')('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');
-          var email = new sendgrid.Email();
+        console.log(ts)
+        if (!ts || ts.length === 0) { console.log('no txs of interest'); return; }
 
-          email.addTo(userEmail);
-          email.setFrom("me@jonl.io");
-          email.setSubject("Sending with SendGrid is Fun");
-          let txt = 'This is your initial receipt. blockchain txid: ' + t.blockchain_tx_id + ', sent from address: ' + t.user_address + ', received for product: ' + t.product_id;
-          email.setHtml(txt);
+	User.find({address_btcp: { $in: ts.map(t => t.user_address) }}).exec()
+        .then(us => {
+          console.log(us)
+          if (!us || us.length === 0) { console.log('user not found'); return; }
 
-          sendgrid.send(email);
-          //TODO retrieve, deliver a product as a URL
+	  ts.forEach(t => { //TODO batch
+	    // using SendGrid's Node.js Library
+	    // https://github.com/sendgrid/sendgrid-nodejs
+	    var sendgrid = sendgridClient(SENDGRID_API_KEY)
+	    var email = new sendgrid.Email();
 
-          self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
-          //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
+	    email.addTo(us.find({address_btcp: t.user_address})[0]);
+	    email.setFrom(FROM_EMAIL);
+	    email.setSubject("Sending with SendGrid is Fun");
+	    let txt = 'This is your initial receipt. blockchain txid: ' + t.blockchain_tx_id + ', sent from address: ' + t.user_address + ', received for product: ' + t.product_id;
+	    email.setHtml(txt);
+
+	    sendgrid.send(email);
+            console.log('sent email')
+	    //TODO retrieve, deliver a product as a URL
+
+	    self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
+	    //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
+	  })
+           
         })
+	.catch(e => {
+	  self.log.error(e);
+	})
+
       })
       .catch(e => {
         self.log.error(e);
@@ -88,7 +109,7 @@ function PizzaShop(options) {
   });
  
   this.node.services.bitcoind.on('tx', function (transactionHex) {
-    self.log.info('Event - tx');
+    //self.log.info('Event - tx');
     //self.log.info(transactionHex);
     // Get outputs
     let t = bitcore.Transaction(transactionHex);
@@ -163,9 +184,10 @@ function PizzaShop(options) {
         .exec()
         .then(m => {
           if (!m || m.xpub == null) {
-            return Promise.reject('Merchant doesn\'t exist (and/or no xpub has been set)!!! Run `node init_mongo` offline.');
+            return Promise.reject('Merchant doesn\'t exist (and/or no merchant xpub has been set)!!! Run `node init_mongo` offline.');
           } else {
-            self.xpub = m.xpub;
+            self.merchantXpub = m.xpub;
+            console.log('Using xpub ', m.xpub);
             return Promise.resolve();
           }
         })
@@ -190,36 +212,29 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
   }
   Transaction.create(tJSON)
     .then(t => {
-      log.info(t);
+      //log.info(t);
       socket.emit('PAID_ENOUGH_' + product._id, { transaction: t });
-      // using SendGrid's Node.js Library
-      // https://github.com/sendgrid/sendgrid-nodejs
-      const SENDGRID_KEY = '' //TODO env var
-      var sendgrid = require('sendgrid')('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');
-      var email = new sendgrid.Email();
 
-      email.addTo(userEmail);
-      email.setFrom("me@jonl.io");
-      email.setSubject("Sending with SendGrid is Fun");
-      email.setHtml("This is your initial receipt - blockchain txid: " + blockchainTxID);
+      User.find({address_btcp: t.user_address}).exec()
+      .then(u => {
+        console.log(JSON.stringify(u))
+	
+	var sendgrid = sendgridClient(SENDGRID_API_KEY);
+	var email = new sendgrid.Email();
 
-      sendgrid.send(email);
-      /*
-      const msg = {
-        to: 'jonlaytonmail@gmail.com',
-        from: 'me@jonl.io',
-        subject: 'Sending with SendGrid is Fun',
-        text: 'and easy to do anywhere, even with Node.js',
-         html: '<strong>and easy to do anywhere, even with Node.js</strong>',
-      };
-      sgMail.send(msg);  
-      */
+	email.addTo(u[0].email);
+	email.setFrom(FROM_EMAIL);
+	email.setSubject("Sending with SendGrid is Fun");
+	email.setHtml("This is your initial receipt - blockchain txid: " + blockchainTxID);
+
+	sendgrid.send(email);
+        console.log('email sent in saveTxAndWait');
+      })
     })
     .catch(e => {
       log.error(e);
     });
 }
-
 
 
 PizzaShop.dependencies = ['bitcoind'];
@@ -292,7 +307,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
           self.log.error(err);
           return res.sendStatus(500);
         })
-      } else if (u.address_btcp === userAddress) { //TODO && > 1 hour 
+      } else if (u.address_btcp === userAddress) { //TODO && > 1 hour since changed
          // Update
          u.email = userEmail;
          u.save().exec().then(x => { return res.sendStatus(204); }).catch(e => { return res.status(500).send({error: e.message}); })
@@ -306,45 +321,6 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
     })
   })
 
-
-
-  const FILES_FOLDER = './songs';
-
-  // Attempt to Use a Download Link (with jwt as query param)
-  function downloadFile(req, res) {
-    let productID = req.params.productID;
-    let jwt = req.query.jwt;
-
-    // Verify Token + its Expiry
-    if (!jwt.verify(jwt, 'DL_VERIFY_SECRET', { algorithms: ['HS256'] })) {
-      //jwt.decode()
-      //TODO check that its data is SALT + sha (via decode?)
-      return res.status(403).send({ err: 'Access Denied' })
-    }
-
-    console.log('JWT verified for song in product ' + productID + ' - downloading');
-
-    // Find + Serve file
-    //TODO lock public permissions on this folder
-    Product.findById(productID)
-    .exec()
-    .then(p => {
-      let songPath = path.join(FILES_FOLDER, p.file_name)
-      return res.download(songPath, p.file_name, function(err) {
-        if (err) {
-          console.log(err)
-          console.log(res.headersSent)
-          return res.end()
-        }
-        console.log('Started Download.')
-      })
-    })
-    .catch(e => {
-      console.log(e)
-      return res.status(500).send({error: e})
-    })
-  }
-  app.get('/download/:productID', downloadFile);
 
   // TODO Rate limit per ip
   app.get('/products', function (req, res, next) {
@@ -360,9 +336,6 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
       })
   })
 
-
-  // TODO Separate - 'mongo_init.js' from 'generate_hd_wallet.js'
-  // TODO Allow 'xpub' as arg to 'setup_mongo_merchant.js' using commander
 
   // INPUTS - {price_satoshis: 1, name: 'x', key: 'server_secret'}
   app.post('/products', verifyKey, function (req, res, next) {
@@ -383,7 +356,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
         }
 
         // Derive next addr from derived xpub
-        let a = bitcore.HDPublicKey(xpub).deriveChild("m/0/" + m.next_address_index).publicKey.toAddress();
+        let a = bitcore.HDPublicKey(merchantXpub).deriveChild("m/0/" + m.next_address_index).publicKey.toAddress();
 
         let pJSON = {
           name: req.body.name,
@@ -412,7 +385,8 @@ PizzaShop.prototype.getRoutePrefix = function () {
 
 // TODO Admin panel - my xpub, my products, txs
 // TODO require distinct Product names (mongoose 'unique: true')
-// TODO watching z addrs - use viewing key - 'zkY4fCSnTUC7fWiPSduJC2kXGMMcRgDsiAv8C7mdWYnLUxRWVh1ocq4XuGzZSDQAu7mqzJGbFPcEeupnWUL2NUv615J38om'
-// TODO optionally handle a deliveryEmail (possible over z memo)
+// TODO watching z addrs
+// TODO Separate - 'mongo_init.js' from 'generate_hd_wallet.js'
+// TODO Allow 'xpub' as arg to 'setup_mongo_merchant.js' using commander
 
 module.exports = PizzaShop;
