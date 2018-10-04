@@ -232,10 +232,14 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
 	email.addTo(u[0].email);
 	email.setFrom(FROM_EMAIL);
 	email.setSubject("Sending with SendGrid is Fun");
-	email.setHtml("This is your initial receipt - blockchain txid: " + blockchainTxID);
+        var htmlString = "This is your initial receipt - blockchain txid: ";
+        htmlString += blockchainTxID;
+        htmlString += "\n";
+        htmlString += "http://hostname:8001/store-demo/s/" + product._id + "?jwt=" + token;
+	email.setHtml(htmlString);
 
 	sendgrid.send(email);
-        console.log('email sent in saveTxAndWait');
+        console.log('Email sent!');
       })
     })
     .catch(e => {
@@ -387,16 +391,20 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
   });
 
   app.get('/s/:productID', function (req, res, next) {
+    self.log.info('GET /s/' + req.params.productID, req.body);
+
     let token = req.query.jwt
     let productID = req.params.productID
     try {
-      var decoded = jwt.verify(token, GLOBAL_SECRET + 'x' + productID);
-      console.log('Successfully decoded jwt:')
-      console.log(decoded)
-      //TODO - serve the file requested
-      return res.send(decoded)
+      var decoded = jwt.verify(token, GLOBAL_SECRET + 'x' + productID)
+      console.log('Successfully decoded jwt:', decoded)
+
+      // TODO validate productID, get filetype
+      // Serve the file requested
+      console.log(__dirname);
+      return res.download('songs/' + productID + '.mp3')
     } catch(err) {
-      console.log(err)
+      self.log.error(err)
       return res.status(400).send()
     }
   });
