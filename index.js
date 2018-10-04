@@ -9,7 +9,8 @@ const mongoose = require('mongoose');
 mongoose.Promise = require('bluebird');
 global.Promise = mongoose.Promise;
 
-const sendgridClient = require('sendgrid')
+const sendgridClient = require('sendgrid');
+var jwt = require('jsonwebtoken');
 
 const Merchant = require('./models').Merchant;
 const BlockManager = require('./models').BlockManager;
@@ -18,7 +19,9 @@ const Product = require('./models').Product;
 const User = require('./models').User;
 
 //TODO relocate
-const SERVER_SECRET = 'SET_ME';
+const MASTER_SERVER_SECRET = 'SET_ME';
+
+const GLOBAL_SECRET = 'testsecretjwt';
 
 const NUM_CONFIRMATIONS = 2;
 
@@ -213,7 +216,11 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
   Transaction.create(tJSON)
     .then(t => {
       //log.info(t);
-      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t });
+      let token = jwt.sign({
+	data: 'test'
+      }, (GLOBAL_SECRET + 'x' + product._id), { expiresIn: '1h' });
+
+      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t, jwt: token});
 
       User.find({address_btcp: t.user_address}).exec()
       .then(u => {
@@ -278,9 +285,12 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
 
   // (Shop Owner Auth)
   var verifyKey = function (req, res, next) {
-    if (req.body.key !== SERVER_SECRET) return res.send(401);
+    if (req.body.key !== MASTER_SERVER_SECRET) return res.send(401);
     next();
   };
+
+  var verifyJWT = function (req, res, next) {
+  }
 
   // TODO Rate limit per ip
   // {userAddress: 'b1xxx', userEmail: 'a@a.com'}
@@ -374,6 +384,21 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
         self.log.error(e);
         return res.status(500).send({ error: e.message });
       });
+  });
+
+  app.get('/s/:productID', function (req, res, next) {
+    let token = req.query.jwt
+    let productID = req.params.productID
+    try {
+      var decoded = jwt.verify(token, GLOBAL_SECRET + 'x' + productID);
+      console.log('Successfully decoded jwt:')
+      console.log(decoded)
+      //TODO - serve the file requested
+      return res.send(decoded)
+    } catch(err) {
+      console.log(err)
+      return res.status(400).send()
+    }
   });
 
 };
