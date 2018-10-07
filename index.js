@@ -19,6 +19,8 @@ const Product = require('./models').Product;
 const User = require('./models').User;
 
 //TODO relocate
+const HOSTNAME = 'shop.my-site.com';
+
 const MASTER_SERVER_SECRET = 'SET_ME';
 
 const GLOBAL_SECRET = 'testsecretjwt';
@@ -75,7 +77,7 @@ function PizzaShop(options) {
         console.log(ts)
         if (!ts || ts.length === 0) { console.log('no txs of interest'); return; }
 
-	User.find({address_btcp: { $in: ts.map(t => t.user_address) }}).exec()
+	  User.find({address_btcp: { $in: ts.map(t => t.user_address) }}).exec()
         .then(us => {
           console.log(us)
           if (!us || us.length === 0) { console.log('user not found'); return; }
@@ -88,12 +90,12 @@ function PizzaShop(options) {
 
 	    email.addTo(us.find({address_btcp: t.user_address})[0]);
 	    email.setFrom(FROM_EMAIL);
-	    email.setSubject("Sending with SendGrid is Fun");
+	    email.setSubject("Store demo - Initial Receipt");
 	    let txt = 'This is your initial receipt. blockchain txid: ' + t.blockchain_tx_id + ', sent from address: ' + t.user_address + ', received for product: ' + t.product_id;
 	    email.setHtml(txt);
 
 	    sendgrid.send(email);
-            console.log('sent email')
+      console.log('sent email')
 	    //TODO retrieve, deliver a product as a URL
 
 	    self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
@@ -217,7 +219,7 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
     .then(t => {
       //log.info(t);
       let token = jwt.sign({
-	data: 'test'
+	      data: 'test'
       }, (GLOBAL_SECRET + 'x' + product._id), { expiresIn: '1h' });
 
       socket.emit('PAID_ENOUGH_' + product._id, { transaction: t, jwt: token});
@@ -226,21 +228,27 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
       .then(u => {
         console.log(JSON.stringify(u))
 	
-	var sendgrid = sendgridClient(SENDGRID_API_KEY);
-	var email = new sendgrid.Email();
+        var sendgrid = sendgridClient(SENDGRID_API_KEY);
+        var email = new sendgrid.Email();
 
-	email.addTo(u[0].email);
-	email.setFrom(FROM_EMAIL);
-	email.setSubject("Sending with SendGrid is Fun");
+        var link = "http://" + HOSTNAME + ":8001/store-demo/s/" + product._id + "?jwt=" + token;
+
+        email.addTo(u[0].email);
+        email.setFrom(FROM_EMAIL);
+        email.setSubject("Your receipt: " + HOSTNAME);
         var htmlString = "This is your initial receipt - blockchain txid: ";
         htmlString += blockchainTxID;
         htmlString += "\n";
-        htmlString += "http://hostname:8001/store-demo/s/" + product._id + "?jwt=" + token;
-	email.setHtml(htmlString);
+        htmlString += link;
+        htmlString += "\n";
+        email.setHtml(htmlString);
 
-	sendgrid.send(email);
+        sendgrid.send(email);
         console.log('Email sent!');
       })
+      .catch(e => {
+        log.error(e);
+      });
     })
     .catch(e => {
       log.error(e);
@@ -313,6 +321,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
     .exec()
     .then(u => {
       if (!u) {
+        if (!userAddress || !userEmail) return res.sendStatus(400);
         User.create({address_btcp: userAddress, email: userEmail})
         .then(x => {
           return res.sendStatus(201);
@@ -402,7 +411,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
       // TODO validate productID, get filetype
       // Serve the file requested
       console.log(__dirname);
-      return res.download('songs/' + productID + '.mp3')
+      return res.download('songs/' + productID + '.flac')
     } catch(err) {
       self.log.error(err)
       return res.status(400).send()
