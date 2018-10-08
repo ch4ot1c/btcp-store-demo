@@ -170,7 +170,7 @@ function PizzaShop(options) {
 
   // Connect to MongoDB (Warning - connect() is Not a real Promise)
   //TODO createConnection, global obj
-  mongoose.connect(options.mongoURL || config.default_mongo_url)
+  mongoose.connect(config.mongo_url)
     .then(() => {
       Merchant.findOne({})
         .select('xpub')
@@ -370,7 +370,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
         }
 
         // Derive next addr from derived xpub
-        let a = bitcore.HDPublicKey(merchantXpub).deriveChild("m/0/" + m.next_address_index).publicKey.toAddress();
+        let a = require('bitcore-lib').HDPublicKey(merchantXpub).deriveChild("m/0/" + m.next_address_index).publicKey.toAddress();
 
         let pJSON = {
           name: req.body.name,
