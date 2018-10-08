@@ -59,13 +59,14 @@ BlockManager.findOne({})
     } else { // Don't touch existing xpub
       //console.log(m.xpub);
       return mongoose.Promise.reject('\nYou already have a Merchant and xpub in MongoDB, for address generation!!! Script canceled.');
+      //return Promise.resolve(m);
     }
   } else {
     return Merchant.create({xpub: derivedXpubkey});
   }
 })
 .then(m => {
-  console.log('Merchant created in MongoDB!');
+  console.log('Merchant configured in MongoDB!');
   //console.log(m);
 
   reportXpubSaved();
@@ -87,7 +88,7 @@ BlockManager.findOne({})
   mongoose.disconnect();
 });
 
-// To create the dummy mongodb/mongoose Products only:
+// To create the dummy mongodb/mongoose Products only, run:
 /*
 createDummyProducts()
 .then(ps => { console.log(ps); mongoose.disconnect(); })
@@ -101,9 +102,17 @@ function addressAtIndex(index) {
 
 function createDummyProducts() { // Pizza Files
   return Promise.all([
-    Product.create({name: 'pizza_whole', price_satoshis: '800', address_btcp: addressAtIndex(0), file_name: 'whole'}),
-    Product.create({name: 'pizza_half', price_satoshis: '400', address_btcp: addressAtIndex(1), file_name: 'half'}),
-    Product.create({name: 'pizza_oneslice', price_satoshis: '100', address_btcp: addressAtIndex(2), file_name: 'oneslice'})
+   Product.create({name: 'pizza_whole', price_satoshis: '800', address_btcp: addressAtIndex(0), file_name: 'whole'}),
+   Product.create({name: 'pizza_half', price_satoshis: '400', address_btcp: addressAtIndex(1), file_name: 'half'}),
+   Product.create({name: 'pizza_oneslice', price_satoshis: '100', address_btcp: addressAtIndex(2), file_name: 'oneslice'})
+      /*
+   Product.create({name: 'E', price_satoshis: '100', address_btcp: addressAtIndex(3), file_name: 'e_lo.flac'}),
+   Product.create({name: 'A', price_satoshis: '100', address_btcp: addressAtIndex(4), file_name: 'a.flac'}),
+   Product.create({name: 'D', price_satoshis: '100', address_btcp: addressAtIndex(5), file_name: 'd.flac'}),
+   Product.create({name: 'G', price_satoshis: '100', address_btcp: addressAtIndex(6), file_name: 'g.flac'}),
+   Product.create({name: 'B', price_satoshis: '100', address_btcp: addressAtIndex(7), file_name: 'b.flac'}),
+   Product.create({name: 'e', price_satoshis: '100', address_btcp: addressAtIndex(8), file_name: 'e_hi.flac'})
+   */
   ])
 }
 

@@ -18,24 +18,12 @@ const Transaction = require('./models').Transaction;
 const Product = require('./models').Product;
 const User = require('./models').User;
 
-//TODO relocate
-const HOSTNAME = 'shop.my-site.com';
+const config = require('./config.json');
 
-const MASTER_SERVER_SECRET = 'SET_ME';
-
-const GLOBAL_SECRET = 'testsecretjwt';
-
-const NUM_CONFIRMATIONS = 2;
-
-const FROM_EMAIL = 'dummy@dummy.com';
-
-const SENDGRID_API_KEY = 'SENDGRID_API_KEY';
-
-const DEFAULT_MONGO_URL = 'mongodb://localhost:27017/store-demo';
-//const hostURL = 'ws://localhost:8001';
-
-// This module will be installed as a service of Bitcore, which will be running on localhost:8001.
-// EXAMPLE - `localhost:8001/store-demo/index.html`
+// This module works as a Bitcore service. Runs on port 8001.
+// Requires a BTCP daemon, with open rpc port 7932.
+//
+// Example page: `localhost:8001/store-demo/store-demo.html`
 
 let merchantXpub
 var products = []
@@ -70,7 +58,7 @@ function PizzaShop(options) {
 
           // Confirm all unconfirmed txs that now have n confirmations
           //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
-          return Transaction.find({ block_mined: { $gte: m.known_tip_height - NUM_CONFIRMATIONS } }).exec()
+          return Transaction.find({ block_mined: { $gte: m.known_tip_height - config.num_confirmations } }).exec()
         }
       })
       .then(ts => {
@@ -85,7 +73,7 @@ function PizzaShop(options) {
 	  ts.forEach(t => { //TODO batch
 	    // using SendGrid's Node.js Library
 	    // https://github.com/sendgrid/sendgrid-nodejs
-	    var sendgrid = sendgridClient(SENDGRID_API_KEY)
+	    var sendgrid = sendgridClient(config.sendgrid_api_key)
 	    var email = new sendgrid.Email();
 
 	    email.addTo(us.find({address_btcp: t.user_address})[0]);
@@ -98,7 +86,7 @@ function PizzaShop(options) {
       console.log('sent email')
 	    //TODO retrieve, deliver a product as a URL
 
-	    self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: NUM_CONFIRMATIONS })
+	    self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: config.num_confirmations})
 	    //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
 	  })
            
@@ -182,7 +170,7 @@ function PizzaShop(options) {
 
   // Connect to MongoDB (Warning - connect() is Not a real Promise)
   //TODO createConnection, global obj
-  mongoose.connect(options.mongoURL || DEFAULT_MONGO_URL)
+  mongoose.connect(options.mongoURL || config.default_mongo_url)
     .then(() => {
       Merchant.findOne({})
         .select('xpub')
@@ -220,7 +208,7 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
       //log.info(t);
       let token = jwt.sign({
 	      data: 'test'
-      }, (GLOBAL_SECRET + 'x' + product._id), { expiresIn: '1h' });
+      }, (config.global_jwt_secret + 'x' + product._id), { expiresIn: '1h' });
 
       socket.emit('PAID_ENOUGH_' + product._id, { transaction: t, jwt: token});
 
@@ -228,20 +216,19 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
       .then(u => {
         console.log(JSON.stringify(u))
 	
-        var sendgrid = sendgridClient(SENDGRID_API_KEY);
+        var sendgrid = sendgridClient(config.sendgrid_api_key);
         var email = new sendgrid.Email();
 
-        var link = "http://" + HOSTNAME + ":8001/store-demo/s/" + product._id + "?jwt=" + token;
+        var link = "http://" + config.hostname + ":8001/store-demo/s/" + product._id + "?jwt=" + token;
 
-        email.addTo(u[0].email);
-        email.setFrom(FROM_EMAIL);
-        email.setSubject("Your receipt: " + HOSTNAME);
+	email.addTo(u[0].email);
+	email.setFrom(config.from_email);
+        email.setSubject("Your receipt: " + config.hostname);
         var htmlString = "This is your initial receipt - blockchain txid: ";
         htmlString += blockchainTxID;
         htmlString += "\n";
-        htmlString += link;
-        htmlString += "\n";
-        email.setHtml(htmlString);
+        htmlString += link; 
+	email.setHtml(htmlString);
 
         sendgrid.send(email);
         console.log('Email sent!');
@@ -297,7 +284,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
 
   // (Shop Owner Auth)
   var verifyKey = function (req, res, next) {
-    if (req.body.key !== MASTER_SERVER_SECRET) return res.send(401);
+    if (req.body.key !== config.master_server_secret) return res.send(401);
     next();
   };
 
@@ -330,10 +317,14 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
           self.log.error(err);
           return res.sendStatus(500);
         })
-      } else if (u.address_btcp === userAddress) { //TODO && > 1 hour since changed
-         // Update
+      } else if (u.address_btcp === userAddress) {
+         // Update (maybe after >1h since last update, or otherwise) - NO
+         // An email is already registered for this input address. They must message the administrator with a proof of ownership to get it reset.
+        /*
          u.email = userEmail;
          u.save().exec().then(x => { return res.sendStatus(204); }).catch(e => { return res.status(500).send({error: e.message}); })
+         */
+         return res.status(400).send({error: 'Address already registered with an email'});
       } else {
         return res.sendStatus(500);
       }
@@ -399,23 +390,30 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
       });
   });
 
+
   app.get('/s/:productID', function (req, res, next) {
     self.log.info('GET /s/' + req.params.productID, req.body);
 
     let token = req.query.jwt
-    let productID = req.params.productID
+    var productID = req.params.productID
     try {
-      var decoded = jwt.verify(token, GLOBAL_SECRET + 'x' + productID)
-      console.log('Successfully decoded jwt:', decoded)
-
-      // TODO validate productID, get filetype
-      // Serve the file requested
-      console.log(__dirname);
-      return res.download('songs/' + productID + '.flac')
+      var decoded = jwt.verify(token, config.global_jwt_secret + 'x' + productID)
     } catch(err) {
       self.log.error(err)
       return res.status(400).send()
     }
+    console.log('Successfully decoded jwt:', decoded)
+
+    Product.findById(productID)
+    .exec()
+    .then(p => {
+      //console.log(__dirname);
+      // TODO validate productID, get filetype
+
+      // Serve the file requested
+      // TODO could also use file_name
+      return res.download('songs/' + productID + '.flac', p.name + '.flac')
+    })
   });
 
 };

@@ -13,9 +13,9 @@
     var userAddress
     window.onload = function() {
       userEmail = prompt("Please enter your email (for delivery)", "me@demo.com")
-      //TODO select coin, allow multiple addr types
-      userAddress = prompt("Please enter your address (any input one you'll be sending from, p2pkh only)", "b1xxx")
-      if (userAddress && userEmail) {
+      //TODO select coin, allow all addr types
+      userAddress = prompt("Please enter your address (any input one you'll be sending from)", "b1xxx")
+      if (userEmail && userAddress) {
         $.post('http://' + hostURL + '/store-demo/guestbook', {userAddress: userAddress, userEmail: userEmail}, function(data) {
           console.log(data)
           //$( ".result" ).html( data );
@@ -48,9 +48,6 @@
 /* WARNING: If the daemon and/or the bitcoin node are down, payments will not process!!! */
 
 var bitcore = require('bitcore-lib')
-
-
-//ec2-54-245-183-37.us-west-2.compute.amazonaws.com:8001
 
 var self = this
 var pendingTransactions = []
@@ -113,7 +110,7 @@ function startSocket(url, products) {
       socket.on('PAID_ENOUGH_' + p._id, json => {
         //console.log(json)
         console.log('PAID_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
-        console.log("http://" + hostURL + ":8001/store-demo/s/" + p._id + "?jwt=" + json.jwt;
+        console.log("http://" + hostURL + "/store-demo/s/" + p._id + "?jwt=" + json.jwt);
 
         pendingTransactions.push(json.transaction)
       })
