@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "homepage": "https://github.com/BTCPrivate/store-demo",
   "authors": [
+    "BTCPrivate",
     "BitPay"
   ],
   "description": "Tutorial service for BTCP Bitcore",

@@ -5,6 +5,26 @@
   <base href="{{baseUrl}}" />
   <script src="js/socket.io.js"></script>
   <script src="js/bitcore-lib/bitcore-lib.js"></script>
+  <script src="https://code.jquery.com/jquery-1.10.2.js"></script>
+  <script>
+    var hostURL = window.location.hostname + ':' + window.location.port
+
+    var userEmail
+    var userAddress
+    window.onload = function() {
+      userEmail = prompt("Please enter your email (for delivery)", "me@demo.com")
+      //TODO select coin, allow all addr types
+      userAddress = prompt("Please enter your address (any input one you'll be sending from)", "b1xxx")
+      if (userEmail && userAddress) {
+        $.post('http://' + hostURL + '/store-demo/guestbook', {userAddress: userAddress, userEmail: userEmail}, function(data) {
+          console.log(data)
+          //$( ".result" ).html( data );
+        });
+      } else {
+        window.history.back()
+      }
+    }
+  </script>
 </head>
 
 <body>
@@ -28,8 +48,6 @@
 /* WARNING: If the daemon and/or the bitcoin node are down, payments will not process!!! */
 
 var bitcore = require('bitcore-lib')
-
-let hostURL = 'ec2-54-188-12-181.us-west-2.compute.amazonaws.com:8001'
 
 var self = this
 var pendingTransactions = []
@@ -90,13 +108,16 @@ function startSocket(url, products) {
 
     products.forEach(p => {
       socket.on('PAID_ENOUGH_' + p._id, json => {
-        console.log(json)
+        //console.log(json)
         console.log('PAID_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
+        console.log("http://" + hostURL + "/store-demo/s/" + p._id + "?jwt=" + json.jwt);
+
         pendingTransactions.push(json.transaction)
       })
       socket.on('PAID_NOT_ENOUGH_' + p._id, json => {
+        //console.log(json)
         console.log('PAID_NOT_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
-        pendingTransactions.push(json.transaction)
+        //pendingTransactions.push(json.transaction) - TODO servicing incomplete payments
       })
     })
 

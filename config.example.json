@@ -1,0 +1,10 @@
+{
+  "hostname": "shop.my-site.com",
+  "master_server_secret": "SET ME",
+  "global_jwt_secret": "SET ME TOO",
+  "num_confirmations": 2,
+  "from_email": "no-reply@my-site.com",
+  "sendgrid_api_key": "SET ME via sendgrid.com",
+  "default_mongo_url": "mongodb://localhost:27017/shop"
+}
+

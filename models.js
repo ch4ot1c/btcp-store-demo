@@ -26,10 +26,21 @@ var ProductSchema = new Schema({
   price_satoshis: {type: Number, required: true},
   address_btcp: {type: String, required: true},
   address_index: {type: String, required: false},
-  name: {type: String, required: true}
+  name: {type: String, required: true},
+  file_name: {type: String, required: false}
 }, {timestamps: true});
 
 var Product = mongoose.model('Product', ProductSchema);
+
+// --- User ---
+
+var UserSchema = new Schema({
+  address_btcp: {type: String, required: true},
+  email: {type: String, required: true},
+  name: {type: String, required: false}
+}, {timestamps: true});
+
+var User = mongoose.model('User', UserSchema);
 
 // --- Transaction - Added once first seen (if relevant) ---
 
@@ -50,6 +61,7 @@ var Transaction = mongoose.model('Transaction', TransactionSchema);
 module.exports = {
   Merchant: Merchant,
   Product: Product,
+  User: User,
   Transaction: Transaction,
   BlockManager: BlockManager
 };
