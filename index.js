@@ -55,17 +55,37 @@ function PizzaShop(options) {
           // Broadcast saved Block Height
           self.node.services.web.io.emit('BLOCK_SEEN', { height: m.known_tip_height });
           //let maxHeight = self.node.services.bitcoind.height;
+          
+          // Read this new block; if any 'block_mined == -1' tx mongo obj receives a txo in it, update its numconfs to 1
+          var block = getblock verbosity=2
+          Transaction.find({block_mined: -1})
+          .exec()
+          .then(ts => {
+            block.tx.forEach(t => {
+              t.vout.forEach(v => {
+                let vAddr = bitcoinjs.address.fromOutput(v.scriptPubKey)
+                let known = ts.find({receiving_address: vAddr})
+                known.forEach(t_k => {
+                  t_k.block_mined = m.known_tip_height
+                  t_k.num_confirmations++
+                  //TODO reverify rest (amount, txid, input)
+                })
+              })
+            })
+          })
 
           // Confirm all unconfirmed txs that now have n confirmations
           //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
+          console.log('a')
           return Transaction.find({ block_mined: { $gte: m.known_tip_height - config.num_confirmations } }).exec()
         }
       })
       .then(ts => {
+        console.log('Transactions on-deck:')
         console.log(ts)
         if (!ts || ts.length === 0) { console.log('no txs of interest'); return; }
 
-	  User.find({address_btcp: { $in: ts.map(t => t.user_address) }}).exec()
+	User.find({address_btcp: { $in: ts.map(t => t.user_address) }}).exec()
         .then(us => {
           console.log(us)
           if (!us || us.length === 0) { console.log('user not found'); return; }
@@ -83,18 +103,16 @@ function PizzaShop(options) {
 	    email.setHtml(txt);
 
 	    sendgrid.send(email);
-      console.log('sent email')
+            console.log('sent email')
 	    //TODO retrieve, deliver a product as a URL
 
-	    self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: config.num_confirmations})
+	    self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: config.num_confirmations, blockchain_txid: t.blockchain_tx_id })
 	    //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
 	  })
-           
         })
 	.catch(e => {
 	  self.log.error(e);
 	})
-
       })
       .catch(e => {
         self.log.error(e);
