@@ -51,7 +51,7 @@ var TransactionSchema = new Schema({
   satoshis: {type: Number, required: true},
   blockchain_tx_id: String,
   // Eventually...
-  block_mined: Number,
+  block_mined: {type: Number, default: -1},
   block_confirmed: Number
 }, {timestamps: true});
 
