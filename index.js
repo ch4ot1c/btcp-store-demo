@@ -20,7 +20,7 @@ const User = require('./models').User;
 
 const config = require('./config.json');
 
-// This module works as a Bitcore service. Runs on port 8001.
+// This module works as a Bitcore service. Runs on port 8001 by default.
 // Requires a BTCP daemon, with open rpc port 7932.
 //
 // Example page: `localhost:8001/store-demo/store-demo.html`
@@ -234,7 +234,9 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
 	      data: 'test'
       }, (config.global_jwt_secret + 'x' + product._id), { expiresIn: '1h' });
 
-      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t, jwt: token});
+      var link = "http://" + config.hostname + "/store-demo/s/" + product._id + "?jwt=" + token;
+
+      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t, jwt: token, delivery: link});
 
       User.find({address_btcp: t.user_address}).exec()
       .then(u => {
@@ -242,8 +244,6 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
 	
         var sendgrid = sendgridClient(config.sendgrid_api_key);
         var email = new sendgrid.Email();
-
-        var link = "http://" + config.hostname + ":8001/store-demo/s/" + product._id + "?jwt=" + token;
 
 	email.addTo(u[0].email);
 	email.setFrom(config.from_email);
@@ -288,8 +288,10 @@ PizzaShop.prototype.getPublishEvents = function () {
 // 1 address per product.
 function getAllProducts() {
   return Product.find()
+    .sort({createdAt: 'desc'})
     .exec()
     .then(ps => {
+      console.log(ps)
       return Promise.resolve(ps.map(p => p.toObject()))
     })
     .catch(e => {

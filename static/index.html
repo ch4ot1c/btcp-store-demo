@@ -5,9 +5,10 @@
   <base href="{{baseUrl}}" />
   <script src="js/socket.io.js"></script>
   <script src="js/bitcore-lib/bitcore-lib.js"></script>
+  <script src="js/download.js"></script>
   <script src="https://code.jquery.com/jquery-1.10.2.js"></script>
   <script>
-    var hostURL = window.location.hostname + ':' + window.location.port
+    var hostURL = window.location.hostname //+ ':' + window.location.port
 
     var userEmail
     var userAddress
@@ -50,6 +51,17 @@
     return res.json()
   })
   .then(data => {
+    /*
+    data.sort(function(a, b){
+      var tA=a.created.at, tB=b.creaeted.at;
+      if (tA < tB)
+        return -1 
+      if (nameA > nameB)
+        return 1
+      return 0 //default return value (no sorting)
+    })
+    */
+
     let products = data
     products.forEach(p => {
       console.log(p)
@@ -94,8 +106,8 @@
       socket = io('//' + hostURL);
 
       // Subscribe to hashblock, rawtransaction, and addresstxid channels
-      socket.emit('subscribe', 'bitcoind/hashblock');
-      socket.emit('subscribe', 'bitcoind/rawtransaction');
+      //socket.emit('subscribe', 'bitcoind/hashblock');
+      //socket.emit('subscribe', 'bitcoind/rawtransaction');
 
       let addresses = products.map(p => { return p.btcp_address; }); 
       socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
@@ -104,9 +116,15 @@
         socket.on('PAID_ENOUGH_' + p._id, json => {
           //console.log(json)
           console.log('PAID_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
-          console.log("http://" + hostURL + "/store-demo/s/" + p._id + "?jwt=" + json.jwt);
+          var link = "http://" + hostURL + "/store-demo/s/" + p._id + "?jwt=" + json.jwt;
+          console.log(link);
 
           pendingTransactions.push(json.transaction)
+
+          let instaDownload = false;
+          if (instaDownload) {
+            downloadFile(link);
+          }
         })
         socket.on('PAID_NOT_ENOUGH_' + p._id, json => {
           //console.log(json)
@@ -127,6 +145,7 @@
           let t = pendingTransactions.filter(t => { console.log(t.product_id); console.log(c.parentNode.id); return t.product_id === c.parentNode.id })[0]
           c.innerHTML = t ? t.confirmations : c.innerHTML
         })
+        // var link = "http://" + hostURL + "/store-demo/s/" + p._id + "?jwt=" + json.jwt;
       })
   }
 
