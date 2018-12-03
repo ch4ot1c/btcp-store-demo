@@ -1,16 +1,166 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Pizza Shop</title>
+  <title>Shop Demo</title>
+  <base href="{{baseUrl}}" />
+  <script src="js/socket.io.js"></script>
+  <script src="js/bitcore-lib/bitcore-lib.js"></script>
+  <script src="js/download.js"></script>
+  <script src="https://code.jquery.com/jquery-1.10.2.js"></script>
+  <script>
+    var hostURL = window.location.hostname //+ ':' + window.location.port
+
+    var userEmail
+    var userAddress
+
+    /* Handle initial page load - user must enter their email-address pair */
+
+    window.onload = function() {
+      userEmail = prompt("Please enter your email (for delivery)", "me@demo.com")
+      //TODO select coin, allow all addr types
+      userAddress = prompt("Please enter your address (any input one you'll be sending from)", "b1xxx")
+      if (userEmail && userAddress) {
+        $.post('http://' + hostURL + '/store-demo/guestbook', {userAddress: userAddress, userEmail: userEmail}, function(data) {
+          console.log(data)
+          //$( ".result" ).html( data );
+        });
+      } else {
+        window.history.back()
+      }
+    }
+  </script>
 </head>
 
 <body>
-  <h1>Pizza Shop</h1>
-  <h2>Create a dummy invoice</h2>
+  <h1>Shop Demo</h1>
 
-  <form method="post" action="invoice">
-    Product id: <input type="text" name="_id"/> <input type="submit" value="Generate Invoice" />
-  </form>
+  <div id="products"></div>
+  <!-- TODO UI for a glow (on socket events) -->
+
+  <script>
+
+  /* Handle client-side events, as provided by a trusted daemon + bitcore node over socket.io */
+  /* WARNING: If the daemon and/or the bitcoin node are down, payments will not process!!! */
+
+  var bitcore = require('bitcore-lib')
+
+  var self = this
+  var pendingTransactions = []
+  fetch('http://' + hostURL + '/store-demo/products')
+  .then(res => {
+    return res.json()
+  })
+  .then(data => {
+    /*
+    data.sort(function(a, b){
+      var tA=a.created.at, tB=b.creaeted.at;
+      if (tA < tB)
+        return -1 
+      if (nameA > nameB)
+        return 1
+      return 0 //default return value (no sorting)
+    })
+    */
+
+    let products = data
+    products.forEach(p => {
+      console.log(p)
+      //let productsRaw = JSON.stringify(data, null, 2);
+      let productElem = document.createElement('p') 
+      productElem.id = p._id
+      productElem.textContent = p.name + " (" + (p.price_satoshis / 1e8) + " BTCP): " + p.address_btcp
+      let confirmationsElem = document.createElement('p')
+      confirmationsElem.className = 'confirmations'
+      productElem.appendChild(confirmationsElem)
+
+      document.getElementById('products').appendChild(productElem)
+
+      startSocket(hostURL, products);
+    })
+  })
+
+  /*
+  socket.on('tip', t => {
+    console.log(t)
+  })
+
+  socket.on('hashblock', h => {
+
+  })
+  */
+
+  function updateSocketSubscriptions(addresses) {
+      //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid', addresses);
+      socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
+  }
+
+  function unsubscribeToAll() {
+      // Subscribe to hashblock, rawtransaction, and addresstxid channels
+      socket.emit('unsubscribe', 'bitcoind/hashblock');
+      socket.emit('unsubscribe', 'bitcoind/rawtransaction');
+      //TODO test - socket.emit('unsubscribe', 'bitcoind/addresstxid');
+  }
+
+  function startSocket(url, products) {
+      // Connect to socket.io, which Bitcore forwards from the indexing daemon's ZMQ
+      socket = io('//' + hostURL);
+
+      // Subscribe to hashblock, rawtransaction, and addresstxid channels
+      //socket.emit('subscribe', 'bitcoind/hashblock');
+      //socket.emit('subscribe', 'bitcoind/rawtransaction');
+
+      let addresses = products.map(p => { return p.btcp_address; }); 
+      socket.emit('subscribe', 'bitcoind/addresstxid', addresses);
+
+      products.forEach(p => {
+        socket.on('PAID_ENOUGH_' + p._id, json => {
+          //console.log(json)
+          console.log('PAID_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
+          var link = "http://" + hostURL + "/store-demo/s/" + p._id + "?jwt=" + json.jwt;
+          console.log(link);
+
+          pendingTransactions.push(json.transaction)
+
+          let instaDownload = false;
+          if (instaDownload) {
+            downloadFile(link);
+          }
+        })
+        socket.on('PAID_NOT_ENOUGH_' + p._id, json => {
+          //console.log(json)
+          console.log('PAID_NOT_ENOUGH_' + p._id + ': ' + json.transaction._id + ', address: ' + json.transaction.user_address);
+          //pendingTransactions.push(json.transaction) - TODO servicing incomplete payments
+        })
+      })
+
+      // Tip, as syncd by the backend bitcore node
+      // (Shouldn't need for any front-end processing,
+      // just for incrementing pending confirmations)
+      socket.on('BLOCK_SEEN', function(o) {
+        console.log('BLOCK_SEEN:' + ': ' + o.height);
+        pendingTransactions.forEach(t => {
+          t.confirmations = o.height - t.block_mined
+        })
+        Array.from(self.document.getElementsByClassName('confirmations')).forEach(function(c) {
+          let t = pendingTransactions.filter(t => { console.log(t.product_id); console.log(c.parentNode.id); return t.product_id === c.parentNode.id })[0]
+          c.innerHTML = t ? t.confirmations : c.innerHTML
+        })
+        // var link = "http://" + hostURL + "/store-demo/s/" + p._id + "?jwt=" + json.jwt;
+      })
+  }
+
+  // If srv, deliver and mark 'delivered' in DB, for this user
+  // If client, show visual 
+  function onPaymentConfirmed(c) {
+    console.log(c.addr);
+    //TODO console.log(txid);
+    //TODO
+  };
+
+  </script>
+
 </body>
 
 </html>
+
+

@@ -1,22 +1,18 @@
 'use strict';
 
-
-// Mongoose
 const mongoose = require('mongoose');
-const DUMMY_MONGO_URL = 'mongodb://localhost:27017/store-demo';
 mongoose.Promise = require('bluebird'); //finally()
 
 const Merchant = require('./models.js').Merchant;
 const BlockManager = require('./models.js').BlockManager;
 const Product = require('./models.js').Product;
 
-// BTCP - BIP44 + BIP39 / HD wallet setup
+const config = require('./config');
 
 const Mnemonic = require('bitcore-mnemonic');
 
 const hdAccount = 0;
-const externalAddrPath = "m/44'/183'/" + hdAccount + "'"; // BIP-0044 + SLIP-0044
-
+const externalAddrPath = "m/44'/183'/" + hdAccount + "'"; // BIP-0032 x BIP-0039 x BIP-0044 x SLIP-0044 (BTCP)
 
 // WARNING: Private keys should always be generated OFFLINE. Running this script on a remote server is not recommended! You can stay safe by only inputting the 'xpub', for address generation.
 
@@ -24,7 +20,7 @@ const externalAddrPath = "m/44'/183'/" + hdAccount + "'"; // BIP-0044 + SLIP-004
 
 // Generate BIP39 mnemonic seed
 const seed = new Mnemonic(Mnemonic.Words.ENGLISH);
-// Generate everything
+// Use this to get other HD info 
 var xprv = seed.toHDPrivateKey();
 var xpub = xprv.hdPublicKey;
 
@@ -32,9 +28,9 @@ var derivedHDPublicKey = xprv.deriveChild(externalAddrPath).hdPublicKey;
 var derivedXpubkey = derivedHDPublicKey.xpubkey.toString();
 
 // Connect to MongoDB
-mongoose.connect(DUMMY_MONGO_URL);
+mongoose.connect(config.mongo_url);
 
-// Create only one mongodb BlockManager
+// Create BlockManager singleton
 BlockManager.findOne({})
 .exec()
 .then(bm => {
@@ -46,7 +42,7 @@ BlockManager.findOne({})
   }
 })
 .then(bm => {
-  // Create only one mongodb Merchant to store derived xpub (for address generation)
+  // Create Merchant singleton, storing derivedXpubkey (for address generation)
   return Merchant.findOne({}).exec()
 })
 .then(m => {
@@ -70,42 +66,33 @@ BlockManager.findOne({})
   //console.log(m);
 
   reportXpubSaved();
-
-  // EXAMPLE - MongoDB dummy products for Pizza Shop
-  return createDummyProducts();
-})
-.then(ps => {
-  console.log(`\nDummy products created in MongoDB! - `);
-  console.log(`\n${ps}`);
-
   reportComplete();
   reportWalletInfo();
-})
-.catch(e => {
-  console.error(e);
-})
-.finally(() => {
-  mongoose.disconnect();
-});
 
-// To create the dummy mongodb/mongoose Products only, run:
-/*
-createDummyProducts()
-.then(ps => { console.log(ps); mongoose.disconnect(); })
-.catch(e => { console.error(e); });
-*/
+  return mongoose.Promise.resolve();
+})
+.then(() => {
+
+})
+.catch(e => { console.log(e) })
+.finally(() => { mongoose.disconnect() })
 
 
 function addressAtIndex(index) {
   return derivedHDPublicKey.deriveChild("m/0/" + index).publicKey.toAddress();
 }
 
-function createDummyProducts() { // Pizza Files
+
+/*
+createDummyProducts()
+.then(ps => { console.log(ps); })
+.catch(e => { console.error(e); })
+.finally(() => mongoose.disconnect())
+*/
+
+function createDummyProducts() {
   return Promise.all([
-   Product.create({name: 'pizza_whole', price_satoshis: '800', address_btcp: addressAtIndex(0), file_name: 'whole'}),
-   Product.create({name: 'pizza_half', price_satoshis: '400', address_btcp: addressAtIndex(1), file_name: 'half'}),
-   Product.create({name: 'pizza_oneslice', price_satoshis: '100', address_btcp: addressAtIndex(2), file_name: 'oneslice'})
-      /*
+   /*
    Product.create({name: 'E', price_satoshis: '100', address_btcp: addressAtIndex(3), file_name: 'e_lo.flac'}),
    Product.create({name: 'A', price_satoshis: '100', address_btcp: addressAtIndex(4), file_name: 'a.flac'}),
    Product.create({name: 'D', price_satoshis: '100', address_btcp: addressAtIndex(5), file_name: 'd.flac'}),

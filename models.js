@@ -26,8 +26,8 @@ var ProductSchema = new Schema({
   price_satoshis: {type: Number, required: true},
   address_btcp: {type: String, required: true},
   address_index: {type: String, required: false},
-  name: {type: String, required: true},
-  file_name: {type: String, required: false}
+  name: {type: String, required: true, unique: true},
+  file_name: {type: String, required: false} // (not in use yet)
 }, {timestamps: true});
 
 var Product = mongoose.model('Product', ProductSchema);
@@ -51,7 +51,7 @@ var TransactionSchema = new Schema({
   satoshis: {type: Number, required: true},
   blockchain_tx_id: String,
   // Eventually...
-  block_mined: Number,
+  block_mined: {type: Number, default: -1},
   block_confirmed: Number
 }, {timestamps: true});
 

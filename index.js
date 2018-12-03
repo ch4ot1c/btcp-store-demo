@@ -20,7 +20,7 @@ const User = require('./models').User;
 
 const config = require('./config.json');
 
-// This module works as a Bitcore service. Runs on port 8001.
+// This module works as a Bitcore service. Runs on port 8001 by default.
 // Requires a BTCP daemon, with open rpc port 7932.
 //
 // Example page: `localhost:8001/store-demo/store-demo.html`
@@ -42,11 +42,11 @@ function PizzaShop(options) {
 
   //TODO check that other necessary services are started first
   //TODO handle remaining events - 'ready', 'syncd', 'error'
-  this.node.services.bitcoind.on('tip', function (h) {
-    self.log.info('Event - tip: ', h);
+  this.node.services.bitcoind.on('tip', function (block) {
+    self.log.info('Event - tip: ', block.height);
 
     // TODO make sure incr'd one; if not, account (reorg? or ffw).
-    BlockManager.findOneAndUpdate({}, { known_tip_height: h }, { new: true })
+    BlockManager.findOneAndUpdate({}, { known_tip_height: block.height }, { new: true })
       .exec()
       .then(m => {
         if (!m) {
@@ -55,54 +55,78 @@ function PizzaShop(options) {
           // Broadcast saved Block Height
           self.node.services.web.io.emit('BLOCK_SEEN', { height: m.known_tip_height });
           //let maxHeight = self.node.services.bitcoind.height;
+          
+          // Read this new block; if any 'block_mined == -1' tx mongo obj receives a txo in it, update its numconfs to 1
+          Transaction.update({block_mined: -1, blockchain_tx_id: {$in: block.tx}}, {block_mined: block.height})
+          .exec()
+          .then(ts => {
+            console.log(ts)
+            console.log('Assigning height to unconfirmed all txs seen: ', ts.length, block.height)
+            console.log(ts)
+              /* With full txs:
+              t.vout.forEach(v => {
+                //let vAddr = bitcoinjs.address.fromOutputScript(v.scriptPubKey)
+                let vAddr = bitcore.Address.fromScript(v.scriptPubKey, 'livenet').toString()
+                console.log(vAddr)
+                let known = ts.find({receiving_address: vAddr})
+                known.forEach(t_k => {
+                  t_k.block_mined = m.known_tip_height
+                  //TODO reverify rest (amount, txid, input)
+                })
+              })
+              */
+          })
+          .then(ts_ => {
+            // Confirm all unconfirmed txs that now have n confirmations
+            //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
+            console.log('Selecting all unconfirmed txs that now have been confirmed')
+            return Transaction.find({ block_mined: m.known_tip_height }).exec()
+          })
+          .then(ts => {
+            console.log('Transactions on-deck:')
+            console.log(ts)
+            if (!ts || ts.length === 0) { console.log('no txs of interest'); return; }
 
-          // Confirm all unconfirmed txs that now have n confirmations
-          //TODO 'required_confirms: n-blocks' in Transaction model? Set+save?
-          return Transaction.find({ block_mined: { $gte: m.known_tip_height - config.num_confirmations } }).exec()
+            User.find({address_btcp: { $in: ts.map(t => t.user_address) }}).exec()
+            .then(us => {
+              console.log(us)
+              if (!us || us.length === 0) { console.log('user not found'); return; }
+
+              ts.forEach(t => { //TODO batch
+                // using SendGrid's Node.js Library
+                // https://github.com/sendgrid/sendgrid-nodejs
+                var sendgrid = sendgridClient(config.sendgrid_api_key)
+                var email = new sendgrid.Email();
+
+                console.log(us)
+                email.addTo(us.find(u => { return u.address_btcp === t.user_address }).email);
+                email.setFrom(config.from_email);
+                email.setSubject("Store demo - Initial Receipt");
+                let txt = 'This is your initial receipt. blockchain txid: ' + t.blockchain_tx_id + ', sent from address: ' + t.user_address + ', received for product: ' + t.product_id;
+                email.setHtml(txt);
+
+                sendgrid.send(email);
+                console.log('sent email')
+                //TODO retrieve, deliver a product as a URL
+
+                self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: block.height, required_confirms: config.num_confirmations, blockchain_txid: t.blockchain_tx_id })
+                //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
+                return Promise.resolve()
+              })
+            })
+            .catch(e => {
+              self.log.error(e);
+            })
+          })
+          .catch(e => {
+            self.log.error(e);
+          })
         }
-      })
-      .then(ts => {
-        console.log(ts)
-        if (!ts || ts.length === 0) { console.log('no txs of interest'); return; }
-
-	  User.find({address_btcp: { $in: ts.map(t => t.user_address) }}).exec()
-        .then(us => {
-          console.log(us)
-          if (!us || us.length === 0) { console.log('user not found'); return; }
-
-	  ts.forEach(t => { //TODO batch
-	    // using SendGrid's Node.js Library
-	    // https://github.com/sendgrid/sendgrid-nodejs
-	    var sendgrid = sendgridClient(config.sendgrid_api_key)
-	    var email = new sendgrid.Email();
-
-	    email.addTo(us.find({address_btcp: t.user_address})[0]);
-	    email.setFrom(FROM_EMAIL);
-	    email.setSubject("Store demo - Initial Receipt");
-	    let txt = 'This is your initial receipt. blockchain txid: ' + t.blockchain_tx_id + ', sent from address: ' + t.user_address + ', received for product: ' + t.product_id;
-	    email.setHtml(txt);
-
-	    sendgrid.send(email);
-      console.log('sent email')
-	    //TODO retrieve, deliver a product as a URL
-
-	    self.node.services.web.io.emit('FINAL_CONFIRM_SEEN', { user_address: t.user_address, height: h, required_confirms: config.num_confirmations})
-	    //TODO broadcast as FINAL_CONFIRM_SEEN_ + t.blockchain_tx_id? (currently no)
-	  })
-           
-        })
-	.catch(e => {
-	  self.log.error(e);
-	})
-
-      })
-      .catch(e => {
-        self.log.error(e);
-      })
+      });
   });
  
   this.node.services.bitcoind.on('tx', function (transactionHex) {
-    //self.log.info('Event - tx');
+    self.log.info('Event - tx');
     //self.log.info(transactionHex);
     // Get outputs
     let t = bitcore.Transaction(transactionHex);
@@ -170,7 +194,7 @@ function PizzaShop(options) {
 
   // Connect to MongoDB (Warning - connect() is Not a real Promise)
   //TODO createConnection, global obj
-  mongoose.connect(options.mongoURL || config.default_mongo_url)
+  mongoose.connect(config.mongo_url)
     .then(() => {
       Merchant.findOne({})
         .select('xpub')
@@ -210,7 +234,9 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
 	      data: 'test'
       }, (config.global_jwt_secret + 'x' + product._id), { expiresIn: '1h' });
 
-      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t, jwt: token});
+      var link = "http://" + config.hostname + "/store-demo/s/" + product._id + "?jwt=" + token;
+
+      socket.emit('PAID_ENOUGH_' + product._id, { transaction: t, jwt: token, delivery: link});
 
       User.find({address_btcp: t.user_address}).exec()
       .then(u => {
@@ -218,8 +244,6 @@ function saveTxAndWait(log, socket, whoPaid, amountPaid, product, blockchainTxID
 	
         var sendgrid = sendgridClient(config.sendgrid_api_key);
         var email = new sendgrid.Email();
-
-        var link = "http://" + config.hostname + ":8001/store-demo/s/" + product._id + "?jwt=" + token;
 
 	email.addTo(u[0].email);
 	email.setFrom(config.from_email);
@@ -264,8 +288,10 @@ PizzaShop.prototype.getPublishEvents = function () {
 // 1 address per product.
 function getAllProducts() {
   return Product.find()
+    .sort({createdAt: 'desc'})
     .exec()
     .then(ps => {
+      console.log(ps)
       return Promise.resolve(ps.map(p => p.toObject()))
     })
     .catch(e => {
@@ -370,7 +396,7 @@ PizzaShop.prototype.setupRoutes = function (app, express) {
         }
 
         // Derive next addr from derived xpub
-        let a = bitcore.HDPublicKey(merchantXpub).deriveChild("m/0/" + m.next_address_index).publicKey.toAddress();
+        let a = require('bitcore-lib').HDPublicKey(merchantXpub).deriveChild("m/0/" + m.next_address_index).publicKey.toAddress();
 
         let pJSON = {
           name: req.body.name,
